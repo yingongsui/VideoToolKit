@@ -24,6 +24,12 @@ Widget buildLocalImage(
   ];
   final colors = palettes[seed % palettes.length];
 
+  String? frameBadge;
+  final frameMatch = RegExp(r'#f(\d+)').firstMatch(path);
+  if (frameMatch != null) {
+    frameBadge = "Frame #${frameMatch.group(1)}";
+  }
+
   return Container(
     width: width,
     height: height,
@@ -34,11 +40,28 @@ Widget buildLocalImage(
         end: Alignment.bottomRight,
       ),
     ),
-    child: const Center(
-      child: Icon(
-        Icons.play_circle_outline,
-        color: Colors.white70,
-        size: 32,
+    child: Center(
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          const Icon(
+            Icons.play_circle_outline,
+            color: Colors.white70,
+            size: 30,
+          ),
+          if (frameBadge != null && (width == null || width >= 90)) ...[
+            const SizedBox(height: 4),
+            Text(
+              frameBadge,
+              style: const TextStyle(
+                color: Colors.white70,
+                fontSize: 10,
+                fontFamily: 'monospace',
+                fontWeight: FontWeight.w600,
+              ),
+            ),
+          ],
+        ],
       ),
     ),
   );
@@ -116,10 +139,17 @@ class VideoService {
     }).toList();
   }
 
-  /// Returns a virtual thumbnail identifier handled by Web buildLocalImage.
-  static Future<String?> generateThumbnail(String videoPath) async {
+  /// Returns a virtual thumbnail identifier sampled at 10% of total frames.
+  static Future<String?> generateThumbnail(
+    String videoPath, {
+    double? fpsValue,
+    int? totalFrames,
+    double? durationSeconds,
+  }) async {
     await Future.delayed(const Duration(milliseconds: 100));
-    return "mock_thumb:$videoPath";
+    final sampledFrame =
+        (totalFrames != null && totalFrames > 0) ? (totalFrames * 0.10).round() : 0;
+    return "mock_thumb:$videoPath#f$sampledFrame";
   }
 
   /// Returns deterministic mock extended metadata for UI preview cards.
@@ -202,10 +232,14 @@ class VideoService {
   /// Returns a virtual frame preview token for Web UI testing.
   static Future<String?> extractFrameAtTime(
     String videoPath,
-    double timestampSeconds,
-  ) async {
+    double timestampSeconds, {
+    int? frameNumber,
+  }) async {
     await Future.delayed(const Duration(milliseconds: 60));
-    return "mock_frame:$videoPath@${timestampSeconds.toStringAsFixed(3)}";
+    final suffix = frameNumber != null
+        ? "#f$frameNumber"
+        : "@${timestampSeconds.toStringAsFixed(3)}";
+    return "mock_frame:$videoPath$suffix";
   }
 
   /// Simulates video trimming progress and FFmpeg logs in Web preview mode.

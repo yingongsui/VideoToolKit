@@ -181,7 +181,7 @@ class _MediaLibraryPageState extends State<MediaLibraryPage> {
     }
   }
 
-  /// Lazily loads thumbnail and metadata once per video path.
+  /// Lazily loads metadata first, then generates a thumbnail at 10% of total frames.
   void _ensureItemLoaded(String path) {
     if (_loadingPaths.contains(path)) return;
     _loadingPaths.add(path);
@@ -189,16 +189,20 @@ class _MediaLibraryPageState extends State<MediaLibraryPage> {
     final item = _itemCache[path];
     if (item == null) return;
 
-    VideoService.generateThumbnail(path).then((thumb) {
-      if (mounted && thumb != null) {
-        setState(() => item.thumbPath = thumb);
-      }
-    });
-
     VideoService.getVideoMetadata(path).then((meta) {
-      if (mounted) {
-        setState(() => item.metadata = meta);
-      }
+      if (!mounted) return;
+      setState(() => item.metadata = meta);
+
+      VideoService.generateThumbnail(
+        path,
+        fpsValue: meta.fpsValue,
+        totalFrames: meta.totalFrames,
+        durationSeconds: meta.durationSeconds,
+      ).then((thumb) {
+        if (mounted && thumb != null) {
+          setState(() => item.thumbPath = thumb);
+        }
+      });
     });
   }
 

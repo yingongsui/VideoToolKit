@@ -97,26 +97,47 @@ class VideoService {
     return results;
   }
 
-  /// Generates and caches a JPEG thumbnail for the given video path.
-  static Future<String?> generateThumbnail(String videoPath) async {
+  /// Generates and caches a JPEG thumbnail sampled at 10% of the video's total frames.
+  static Future<String?> generateThumbnail(
+    String videoPath, {
+    double? fpsValue,
+    int? totalFrames,
+    double? durationSeconds,
+  }) async {
     try {
       final cacheDir = await getTemporaryDirectory();
-      final thumbPath = "${cacheDir.path}/thumb_${videoPath.hashCode}.jpg";
+
+      // Sample at 10% of total frames so both short and long videos get a representative frame.
+      final int sampledFrame =
+          (totalFrames != null && totalFrames > 0) ? (totalFrames * 0.10).round() : 0;
+
+      final thumbPath =
+          "${cacheDir.path}/thumb_${videoPath.hashCode}_10pct_f$sampledFrame.jpg";
       if (await File(thumbPath).exists()) return thumbPath;
 
       final safeInput = _escapeSingleQuotes(videoPath);
       final safeThumb = _escapeSingleQuotes(thumbPath);
-      final command =
-          "-y -ss 00:00:01 -i '$safeInput' -vframes 1 -q:v 2 '$safeThumb'";
+
+      double seekSeconds = 0.0;
+      if (sampledFrame > 0 && fpsValue != null && fpsValue > 0) {
+        seekSeconds = sampledFrame / fpsValue;
+      } else if (durationSeconds != null && durationSeconds > 0) {
+        seekSeconds = durationSeconds * 0.10;
+      }
+
+      final ts = seekSeconds.toStringAsFixed(3);
+      final command = "-y -ss $ts -i '$safeInput' -vframes 1 -q:v 2 '$safeThumb'";
       final session = await FFmpegKit.execute(command);
-      if (ReturnCode.isSuccess(await session.getReturnCode())) {
+      if (ReturnCode.isSuccess(await session.getReturnCode()) &&
+          await File(thumbPath).exists()) {
         return thumbPath;
       }
 
-      // Fallback to the first frame if the video is shorter than 1 second.
+      // Fallback to the first frame if seeking fails.
       final fallbackCmd = "-y -i '$safeInput' -vframes 1 -q:v 2 '$safeThumb'";
       final fallbackSession = await FFmpegKit.execute(fallbackCmd);
-      if (ReturnCode.isSuccess(await fallbackSession.getReturnCode())) {
+      if (ReturnCode.isSuccess(await fallbackSession.getReturnCode()) &&
+          await File(thumbPath).exists()) {
         return thumbPath;
       }
     } catch (e) {
@@ -358,16 +379,19 @@ class VideoService {
     }
   }
 
-  /// Extracts a single JPEG frame at the given timestamp for trim previewing.
+  /// Extracts a single JPEG frame at the given timestamp/frame for trim previewing.
   static Future<String?> extractFrameAtTime(
     String videoPath,
-    double timestampSeconds,
-  ) async {
+    double timestampSeconds, {
+    int? frameNumber,
+  }) async {
     try {
       final cacheDir = await getTemporaryDirectory();
-      final ms = (timestampSeconds * 1000).round();
+      final key = frameNumber != null
+          ? "f$frameNumber"
+          : "ms${(timestampSeconds * 1000).round()}";
       final outPath =
-          "${cacheDir.path}/trim_frame_${videoPath.hashCode}_$ms.jpg";
+          "${cacheDir.path}/trim_frame_${videoPath.hashCode}_$key.jpg";
       if (await File(outPath).exists()) return outPath;
 
       final safeInput = _escapeSingleQuotes(videoPath);
@@ -375,7 +399,8 @@ class VideoService {
       final ts = timestampSeconds.toStringAsFixed(3);
       final command = "-y -ss $ts -i '$safeInput' -vframes 1 -q:v 3 '$safeOut'";
       final session = await FFmpegKit.execute(command);
-      if (ReturnCode.isSuccess(await session.getReturnCode())) {
+      if (ReturnCode.isSuccess(await session.getReturnCode()) &&
+          await File(outPath).exists()) {
         return outPath;
       }
     } catch (e) {

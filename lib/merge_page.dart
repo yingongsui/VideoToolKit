@@ -45,17 +45,32 @@ class _MergePageState extends State<MergePage> {
 
     // Ensure thumbnails and metadata are loaded for any passed items.
     for (final item in videoItems) {
-      if (item.thumbPath == null) {
-        VideoService.generateThumbnail(item.path).then((thumb) {
-          if (mounted && thumb != null) {
-            setState(() => item.thumbPath = thumb);
-          }
-        });
-      }
       if (item.metadata == null) {
         VideoService.getVideoMetadata(item.path).then((meta) {
-          if (mounted) {
-            setState(() => item.metadata = meta);
+          if (!mounted) return;
+          setState(() => item.metadata = meta);
+          if (item.thumbPath == null) {
+            VideoService.generateThumbnail(
+              item.path,
+              fpsValue: meta.fpsValue,
+              totalFrames: meta.totalFrames,
+              durationSeconds: meta.durationSeconds,
+            ).then((thumb) {
+              if (mounted && thumb != null) {
+                setState(() => item.thumbPath = thumb);
+              }
+            });
+          }
+        });
+      } else if (item.thumbPath == null) {
+        VideoService.generateThumbnail(
+          item.path,
+          fpsValue: item.metadata?.fpsValue,
+          totalFrames: item.metadata?.totalFrames,
+          durationSeconds: item.metadata?.durationSeconds,
+        ).then((thumb) {
+          if (mounted && thumb != null) {
+            setState(() => item.thumbPath = thumb);
           }
         });
       }
@@ -95,12 +110,17 @@ class _MergePageState extends State<MergePage> {
         videoItems.add(newItem);
       });
 
-      VideoService.generateThumbnail(path).then((thumb) {
-        if (mounted) setState(() => newItem.thumbPath = thumb);
-      });
-
       VideoService.getVideoMetadata(path).then((meta) {
-        if (mounted) setState(() => newItem.metadata = meta);
+        if (!mounted) return;
+        setState(() => newItem.metadata = meta);
+        VideoService.generateThumbnail(
+          path,
+          fpsValue: meta.fpsValue,
+          totalFrames: meta.totalFrames,
+          durationSeconds: meta.durationSeconds,
+        ).then((thumb) {
+          if (mounted) setState(() => newItem.thumbPath = thumb);
+        });
       });
     }
   }

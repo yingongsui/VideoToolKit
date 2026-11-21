@@ -179,9 +179,11 @@ class _TrimPageState extends State<TrimPage> {
       _startPreviewDebounce?.cancel();
       _startPreviewDebounce = Timer(const Duration(milliseconds: 180), () async {
         final ts = _startSeconds;
+        final frame = _startFrame;
         final path = await VideoService.extractFrameAtTime(
           widget.videoItem.path,
           ts,
+          frameNumber: frame,
         );
         if (mounted && path != null) {
           setState(() => _startFrameThumb = path);
@@ -192,9 +194,11 @@ class _TrimPageState extends State<TrimPage> {
       _endPreviewDebounce = Timer(const Duration(milliseconds: 180), () async {
         // Sample slightly before the exact end to avoid empty EOF frames.
         final ts = math.max(0.0, _endSeconds - (0.5 / _fps));
+        final frame = _endFrame;
         final path = await VideoService.extractFrameAtTime(
           widget.videoItem.path,
           ts,
+          frameNumber: frame,
         );
         if (mounted && path != null) {
           setState(() => _endFrameThumb = path);
