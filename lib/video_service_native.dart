@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:io';
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
@@ -31,6 +32,22 @@ Widget buildLocalImage(
 class VideoService {
   /// Indicates whether the service is running in Web mock preview mode.
   static const bool isWebPreview = false;
+
+  // Serializes FFmpeg/FFprobe background tasks to avoid native concurrency failures.
+  static Future<void> _taskQueue = Future.value();
+
+  static Future<T> _enqueue<T>(Future<T> Function() task) {
+    final completer = Completer<T>();
+    _taskQueue = _taskQueue.then((_) async {
+      try {
+        final result = await task();
+        completer.complete(result);
+      } catch (e, st) {
+        completer.completeError(e, st);
+      }
+    });
+    return completer.future;
+  }
 
   /// Default initial folders (empty on native; user picks real directories).
   static List<String> get defaultPreviewFolders => const [];
@@ -97,58 +114,105 @@ class VideoService {
     return results;
   }
 
-  /// Generates and caches a JPEG thumbnail sampled at 10% of the video's total frames.
+  /// Generates and caches a thumbnail sampled at 10% of the video's total frames.
   static Future<String?> generateThumbnail(
     String videoPath, {
     double? fpsValue,
     int? totalFrames,
     double? durationSeconds,
   }) async {
-    try {
-      final cacheDir = await getTemporaryDirectory();
+    return _enqueue(() async {
+      try {
+        final cacheDir = await getTemporaryDirectory();
 
-      // Sample at 10% of total frames so both short and long videos get a representative frame.
-      final int sampledFrame =
-          (totalFrames != null && totalFrames > 0) ? (totalFrames * 0.10).round() : 0;
+        // Sample at 10% of total frames so both short and long videos get a representative frame.
+        final int sampledFrame = (totalFrames != null && totalFrames > 0)
+            ? (totalFrames * 0.10).round()
+            : 0;
 
-      final thumbPath =
-          "${cacheDir.path}/thumb_${videoPath.hashCode}_10pct_f$sampledFrame.jpg";
-      if (await File(thumbPath).exists()) return thumbPath;
+        final jpgPath =
+            "${cacheDir.path}/thumb_v2_${videoPath.hashCode}_10pct_f$sampledFrame.jpg";
+        final jpgFile = File(jpgPath);
+        if (await jpgFile.exists() && await jpgFile.length() > 0) {
+          return jpgPath;
+        }
 
-      final safeInput = _escapeSingleQuotes(videoPath);
-      final safeThumb = _escapeSingleQuotes(thumbPath);
+        double seekSeconds = 0.0;
+        if (sampledFrame > 0 && fpsValue != null && fpsValue > 0) {
+          seekSeconds = sampledFrame / fpsValue;
+        } else if (durationSeconds != null && durationSeconds > 0) {
+          seekSeconds = durationSeconds * 0.10;
+        }
 
-      double seekSeconds = 0.0;
-      if (sampledFrame > 0 && fpsValue != null && fpsValue > 0) {
-        seekSeconds = sampledFrame / fpsValue;
-      } else if (durationSeconds != null && durationSeconds > 0) {
-        seekSeconds = durationSeconds * 0.10;
+        // Use executeWithArguments to safely handle spaces/Unicode, and convert to
+        // full-range yuvj420p with -strict unofficial so MJPEG accepts 8-bit/10-bit inputs.
+        final args = <String>[
+          '-y',
+          if (seekSeconds > 0) ...['-ss', seekSeconds.toStringAsFixed(3)],
+          '-i',
+          videoPath,
+          '-frames:v',
+          '1',
+          '-vf',
+          'scale=480:-2,format=yuvj420p',
+          '-strict',
+          'unofficial',
+          '-q:v',
+          '3',
+          jpgPath,
+        ];
+
+        final session = await FFmpegKit.executeWithArguments(args);
+        if (ReturnCode.isSuccess(await session.getReturnCode()) &&
+            await jpgFile.exists() &&
+            await jpgFile.length() > 0) {
+          return jpgPath;
+        }
+
+        debugPrint(
+          "[VideoService] JPEG thumbnail failed for '$videoPath': ${await session.getOutput()}",
+        );
+
+        // Fallback to PNG from the first frame (avoids MJPEG pixel-format restrictions).
+        final pngPath =
+            "${cacheDir.path}/thumb_v2_${videoPath.hashCode}_fallback.png";
+        final pngFile = File(pngPath);
+        if (await pngFile.exists() && await pngFile.length() > 0) {
+          return pngPath;
+        }
+
+        final fallbackArgs = <String>[
+          '-y',
+          '-i',
+          videoPath,
+          '-frames:v',
+          '1',
+          '-vf',
+          'scale=480:-2',
+          pngPath,
+        ];
+        final fallbackSession =
+            await FFmpegKit.executeWithArguments(fallbackArgs);
+        if (ReturnCode.isSuccess(await fallbackSession.getReturnCode()) &&
+            await pngFile.exists() &&
+            await pngFile.length() > 0) {
+          return pngPath;
+        }
+
+        debugPrint(
+          "[VideoService] PNG fallback thumbnail failed for '$videoPath': ${await fallbackSession.getOutput()}",
+        );
+      } catch (e) {
+        debugPrint("[VideoService] Thumbnail generation error: $e");
       }
-
-      final ts = seekSeconds.toStringAsFixed(3);
-      final command = "-y -ss $ts -i '$safeInput' -vframes 1 -q:v 2 '$safeThumb'";
-      final session = await FFmpegKit.execute(command);
-      if (ReturnCode.isSuccess(await session.getReturnCode()) &&
-          await File(thumbPath).exists()) {
-        return thumbPath;
-      }
-
-      // Fallback to the first frame if seeking fails.
-      final fallbackCmd = "-y -i '$safeInput' -vframes 1 -q:v 2 '$safeThumb'";
-      final fallbackSession = await FFmpegKit.execute(fallbackCmd);
-      if (ReturnCode.isSuccess(await fallbackSession.getReturnCode()) &&
-          await File(thumbPath).exists()) {
-        return thumbPath;
-      }
-    } catch (e) {
-      debugPrint("[VideoService] Thumbnail generation error: $e");
-    }
-    return null;
+      return null;
+    });
   }
 
   /// Probes detailed video and audio metadata using file stats and FFprobeKit.
   static Future<VideoMetadata> getVideoMetadata(String videoPath) async {
-    try {
+    return _enqueue(() async {
+      try {
       String sizeStr = "Unknown";
       try {
         final file = File(videoPath);
@@ -306,6 +370,7 @@ class VideoService {
       debugPrint("[VideoService] Metadata probe error: $e");
     }
     return VideoMetadata();
+    });
   }
 
   /// Concatenates video files losslessly via FFmpeg concat demuxer (-c copy).
@@ -329,10 +394,18 @@ class VideoService {
     }
     await listFile.writeAsString(buffer.toString());
 
-    final safeListPath = _escapeSingleQuotes(listFile.path);
-    final safeOutPath = _escapeSingleQuotes(outputPath);
-    final command =
-        "-y -f concat -safe 0 -i '$safeListPath' -c copy '$safeOutPath'";
+    final args = <String>[
+      '-y',
+      '-f',
+      'concat',
+      '-safe',
+      '0',
+      '-i',
+      listFile.path,
+      '-c',
+      'copy',
+      outputPath,
+    ];
 
     FFmpegKitConfig.enableStatisticsCallback((statistics) {
       try {
@@ -360,7 +433,7 @@ class VideoService {
     });
 
     debugPrint("[VideoService] Starting FFmpeg concat merge.");
-    final session = await FFmpegKit.execute(command);
+    final session = await FFmpegKit.executeWithArguments(args);
     final returnCode = await session.getReturnCode();
 
     FFmpegKitConfig.enableStatisticsCallback(null);
@@ -379,34 +452,77 @@ class VideoService {
     }
   }
 
-  /// Extracts a single JPEG frame at the given timestamp/frame for trim previewing.
+  /// Extracts a single preview frame at the given timestamp/frame for trim previewing.
   static Future<String?> extractFrameAtTime(
     String videoPath,
     double timestampSeconds, {
     int? frameNumber,
   }) async {
-    try {
-      final cacheDir = await getTemporaryDirectory();
-      final key = frameNumber != null
-          ? "f$frameNumber"
-          : "ms${(timestampSeconds * 1000).round()}";
-      final outPath =
-          "${cacheDir.path}/trim_frame_${videoPath.hashCode}_$key.jpg";
-      if (await File(outPath).exists()) return outPath;
+    return _enqueue(() async {
+      try {
+        final cacheDir = await getTemporaryDirectory();
+        final key = frameNumber != null
+            ? "f$frameNumber"
+            : "ms${(timestampSeconds * 1000).round()}";
+        final outPath =
+            "${cacheDir.path}/trim_v2_${videoPath.hashCode}_$key.jpg";
+        final outFile = File(outPath);
+        if (await outFile.exists() && await outFile.length() > 0) {
+          return outPath;
+        }
 
-      final safeInput = _escapeSingleQuotes(videoPath);
-      final safeOut = _escapeSingleQuotes(outPath);
-      final ts = timestampSeconds.toStringAsFixed(3);
-      final command = "-y -ss $ts -i '$safeInput' -vframes 1 -q:v 3 '$safeOut'";
-      final session = await FFmpegKit.execute(command);
-      if (ReturnCode.isSuccess(await session.getReturnCode()) &&
-          await File(outPath).exists()) {
-        return outPath;
+        final ts = timestampSeconds.toStringAsFixed(3);
+        final args = <String>[
+          '-y',
+          '-ss',
+          ts,
+          '-i',
+          videoPath,
+          '-frames:v',
+          '1',
+          '-vf',
+          'scale=960:-2,format=yuvj420p',
+          '-strict',
+          'unofficial',
+          '-q:v',
+          '3',
+          outPath,
+        ];
+        final session = await FFmpegKit.executeWithArguments(args);
+        if (ReturnCode.isSuccess(await session.getReturnCode()) &&
+            await outFile.exists() &&
+            await outFile.length() > 0) {
+          return outPath;
+        }
+
+        // PNG fallback if MJPEG rejects the stream's pixel format.
+        final pngPath =
+            "${cacheDir.path}/trim_v2_${videoPath.hashCode}_$key.png";
+        final pngFile = File(pngPath);
+        final fallbackArgs = <String>[
+          '-y',
+          '-ss',
+          ts,
+          '-i',
+          videoPath,
+          '-frames:v',
+          '1',
+          '-vf',
+          'scale=960:-2',
+          pngPath,
+        ];
+        final fallbackSession =
+            await FFmpegKit.executeWithArguments(fallbackArgs);
+        if (ReturnCode.isSuccess(await fallbackSession.getReturnCode()) &&
+            await pngFile.exists() &&
+            await pngFile.length() > 0) {
+          return pngPath;
+        }
+      } catch (e) {
+        debugPrint("[VideoService] Frame extraction error: $e");
       }
-    } catch (e) {
-      debugPrint("[VideoService] Frame extraction error: $e");
-    }
-    return null;
+      return null;
+    });
   }
 
   /// Trims a video segment using either coarse fast copy (-c copy) or
@@ -423,15 +539,41 @@ class VideoService {
   }) async {
     if (endSeconds <= startSeconds) return null;
 
-    final safeInput = _escapeSingleQuotes(inputPath);
-    final safeOut = _escapeSingleQuotes(outputPath);
     final startStr = formatTimecode(startSeconds);
     final durationStr = formatTimecode(endSeconds - startSeconds);
 
     // Coarse mode uses input seeking + stream copy; fine mode uses accurate seeking + re-encode.
-    final command = frameAccurate
-        ? "-y -ss $startStr -i '$safeInput' -t $durationStr -c:v libx264 -preset veryfast -crf 18 -c:a aac '$safeOut'"
-        : "-y -ss $startStr -i '$safeInput' -t $durationStr -c copy '$safeOut'";
+    final args = frameAccurate
+        ? <String>[
+            '-y',
+            '-ss',
+            startStr,
+            '-i',
+            inputPath,
+            '-t',
+            durationStr,
+            '-c:v',
+            'libx264',
+            '-preset',
+            'veryfast',
+            '-crf',
+            '18',
+            '-c:a',
+            'aac',
+            outputPath,
+          ]
+        : <String>[
+            '-y',
+            '-ss',
+            startStr,
+            '-i',
+            inputPath,
+            '-t',
+            durationStr,
+            '-c',
+            'copy',
+            outputPath,
+          ];
 
     FFmpegKitConfig.enableStatisticsCallback((statistics) {
       try {
@@ -458,7 +600,7 @@ class VideoService {
     });
 
     debugPrint("[VideoService] Starting FFmpeg trim (frameAccurate=$frameAccurate).");
-    final session = await FFmpegKit.execute(command);
+    final session = await FFmpegKit.executeWithArguments(args);
     final returnCode = await session.getReturnCode();
 
     FFmpegKitConfig.enableStatisticsCallback(null);
@@ -489,10 +631,6 @@ class VideoService {
       return "${rounded.toInt()} FPS";
     }
     return "${fps.toStringAsFixed(2)} FPS";
-  }
-
-  static String _escapeSingleQuotes(String input) {
-    return input.replaceAll("'", "'\\''");
   }
 
   static String _escapeConcatPath(String input) {
