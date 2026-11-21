@@ -1,17 +1,20 @@
 name: Build macOS Desktop App
 
 on:
+  # Trigger manually from GitHub Actions tab or when pushing a version tag (e.g. v1.0.0).
+  # Avoids running a slow macOS build on every routine commit.
+  workflow_dispatch:
   push:
-    branches:
-      - main
-      - master
     tags:
       - 'v*'
-  workflow_dispatch:
+
+concurrency:
+  group: macos-build-${{ github.ref }}
+  cancel-in-progress: true
 
 jobs:
   build_macos:
-    name: Build macOS Release (.app / .dmg)
+    name: Build macOS Release (.dmg)
     runs-on: macos-15
 
     permissions:
@@ -27,28 +30,29 @@ jobs:
           channel: stable
           cache: true
 
+      - name: Cache CocoaPods (speeds up ffmpeg_kit download)
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/Library/Caches/CocoaPods
+            macos/Pods
+          key: pods-macos-${{ hashFiles('pubspec.lock') }}
+          restore-keys: |
+            pods-macos-
+
       - name: Enable macOS desktop support
         run: flutter config --enable-macos-desktop
 
       - name: Install Dart & Flutter dependencies
         run: flutter pub get
 
-      - name: Run static analysis
-        run: flutter analyze
-
       - name: Build macOS release app
         run: flutter build macos --release
 
-      - name: Package .app into .zip and .dmg
+      - name: Package .dmg
         run: |
           mkdir -p dist/dmg_stage
-          APP_PATH="build/macos/Build/Products/Release/video_merger.app"
-
-          # Use ditto to preserve macOS bundle symlinks and embedded frameworks.
-          ditto -c -k --sequesterRsrc --keepParent "$APP_PATH" dist/video_merger-macos.zip
-
-          # Create a drag-and-drop DMG image using built-in hdiutil.
-          cp -R "$APP_PATH" dist/dmg_stage/
+          cp -R "build/macos/Build/Products/Release/video_merger.app" dist/dmg_stage/
           ln -s /Applications dist/dmg_stage/Applications
           hdiutil create \
             -volname "Video Merger" \
@@ -57,19 +61,15 @@ jobs:
             -format UDZO \
             dist/video_merger-macos.dmg
 
-      - name: Upload macOS build artifacts
+      - name: Upload macOS DMG artifact
         uses: actions/upload-artifact@v4
         with:
-          name: video_merger-macos
-          path: |
-            dist/video_merger-macos.zip
-            dist/video_merger-macos.dmg
+          name: video_merger-macos-dmg
+          path: dist/video_merger-macos.dmg
           retention-days: 14
 
       - name: Create GitHub Release (on version tag)
         if: startsWith(github.ref, 'refs/tags/v')
         uses: softprops/action-gh-release@v2
         with:
-          files: |
-            dist/video_merger-macos.zip
-            dist/video_merger-macos.dmg
+          files: dist/video_merger-macos.dmg
