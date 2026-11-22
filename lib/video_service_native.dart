@@ -388,18 +388,29 @@ class VideoService {
     });
   }
 
-  /// Extracts keyframe (I-frame) timestamps in seconds using fast packet-level FFprobe.
-  static Future<List<double>> getKeyframes(
+  /// Extracts keyframe (I-frame) timestamps within a local window around [centerSeconds]
+  /// using FFprobe -read_intervals to avoid full-file packet scans and native log overflow.
+  static Future<List<double>> getKeyframesNear(
     String videoPath, {
+    required double centerSeconds,
+    double windowSeconds = 15.0,
     double durationSeconds = 0.0,
   }) async {
     return _enqueue(() async {
       try {
+        final start = (centerSeconds - windowSeconds) < 0
+            ? 0.0
+            : (centerSeconds - windowSeconds);
+        final span = (windowSeconds * 2).toStringAsFixed(2);
+        final interval = "${start.toStringAsFixed(2)}%+$span";
+
         final args = <String>[
           '-v',
           'error',
           '-select_streams',
           'v:0',
+          '-read_intervals',
+          interval,
           '-show_entries',
           'packet=pts_time,flags',
           '-of',
@@ -434,7 +445,7 @@ class VideoService {
         }
         return deduped;
       } catch (e) {
-        debugPrint("[VideoService] Keyframe probe error: $e");
+        debugPrint("[VideoService] Local keyframe probe error: $e");
         return const <double>[];
       }
     });

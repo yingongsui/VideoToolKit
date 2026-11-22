@@ -31,10 +31,9 @@ class _TrimPageState extends State<TrimPage> {
   // Export mode: false = fast keyframe copy (-c copy), true = frame-accurate re-encode.
   bool _frameAccurateExport = false;
 
-  // Keyframe snapping state (enabled by default in Coarse mode for lossless -c copy).
+  // Keyframe snapping state (on-demand local -read_intervals scan; no full-file scan).
   bool _snapToKeyframe = true;
-  bool _isLoadingKeyframes = false;
-  List<double> _keyframes = [];
+  bool _isProbingKeyframes = false;
 
   // Which boundary is currently focused in Fine Frame zoom slider (true = IN, false = OUT).
   bool _fineEditingStart = true;
@@ -123,76 +122,89 @@ class _TrimPageState extends State<TrimPage> {
 
     _scheduleFramePreview(isStart: true);
     _scheduleFramePreview(isStart: false);
-    _loadKeyframes(parsedDuration);
   }
 
-  Future<void> _loadKeyframes(double durationSec) async {
-    setState(() => _isLoadingKeyframes = true);
-    final kfs = await VideoService.getKeyframes(
-      widget.videoItem.path,
-      durationSeconds: durationSec,
-    );
-    if (!mounted) return;
-    setState(() {
-      _keyframes = kfs;
-      _isLoadingKeyframes = false;
-    });
+  /// Queries keyframes only in a local window around [targetSeconds] via -read_intervals.
+  Future<List<double>> _probeKeyframesNear(
+    double targetSeconds, {
+    double windowSeconds = 15.0,
+  }) async {
+    setState(() => _isProbingKeyframes = true);
+    try {
+      return await VideoService.getKeyframesNear(
+        widget.videoItem.path,
+        centerSeconds: targetSeconds,
+        windowSeconds: windowSeconds,
+        durationSeconds: _durationSeconds,
+      );
+    } finally {
+      if (mounted) setState(() => _isProbingKeyframes = false);
+    }
   }
 
-  /// Finds the nearest keyframe timestamp to [targetSeconds] using binary search.
-  double _snapSecondsToNearestKeyframe(double targetSeconds) {
-    if (_keyframes.isEmpty) return targetSeconds;
-    int low = 0;
-    int high = _keyframes.length - 1;
-    while (low < high) {
-      final mid = (low + high) >> 1;
-      if (_keyframes[mid] < targetSeconds) {
-        low = mid + 1;
-      } else {
-        high = mid;
-      }
-    }
-    double best = _keyframes[low];
-    if (low > 0) {
-      final prev = _keyframes[low - 1];
-      if ((targetSeconds - prev).abs() <= (best - targetSeconds).abs()) {
-        best = prev;
-      }
-    }
-    return best;
-  }
+  /// Snaps the IN or OUT boundary to the nearest keyframe in a local +/-15s window.
+  Future<void> _snapBoundaryToNearestKeyframe({
+    required bool isStart,
+    required double targetSeconds,
+  }) async {
+    final kfs = await _probeKeyframesNear(targetSeconds);
+    if (!mounted || kfs.isEmpty) return;
 
-  /// Steps to the previous or next keyframe relative to the current IN/OUT timestamp.
-  void _stepKeyframe({required bool isStart, required bool next}) {
-    if (_keyframes.isEmpty) {
-      _showSnackBar("No keyframes loaded yet.");
-      return;
-    }
-    final current = isStart ? _startSeconds : _endSeconds;
-    double? target;
-    if (next) {
-      for (final kf in _keyframes) {
-        if (kf > current + 0.02) {
-          target = kf;
-          break;
-        }
+    double best = kfs.first;
+    double bestDiff = (targetSeconds - best).abs();
+    for (final kf in kfs) {
+      final diff = (targetSeconds - kf).abs();
+      if (diff < bestDiff) {
+        best = kf;
+        bestDiff = diff;
       }
-      target ??= _durationSeconds;
+    }
+
+    if (isStart) {
+      _setStartSeconds(best);
     } else {
-      for (int i = _keyframes.length - 1; i >= 0; i--) {
-        if (_keyframes[i] < current - 0.02) {
-          target = _keyframes[i];
-          break;
-        }
-      }
-      target ??= 0.0;
+      _setEndSeconds(best);
     }
+  }
+
+  /// Steps to the previous or next keyframe relative to the current IN/OUT timestamp
+  /// using an on-demand local -read_intervals scan.
+  Future<void> _stepKeyframe({required bool isStart, required bool next}) async {
+    final current = isStart ? _startSeconds : _endSeconds;
+    // Scan a +/-20s window around the current point; widen to +/-45s for very long GOPs.
+    var kfs = await _probeKeyframesNear(current, windowSeconds: 20.0);
+    double? target = _findAdjacentKeyframe(kfs, current, next: next);
+
+    if (target == null && mounted) {
+      kfs = await _probeKeyframesNear(current, windowSeconds: 45.0);
+      target = _findAdjacentKeyframe(kfs, current, next: next);
+    }
+
+    if (!mounted) return;
+    target ??= next ? _durationSeconds : 0.0;
 
     if (isStart) {
       _setStartSeconds(target);
     } else {
       _setEndSeconds(target);
     }
+  }
+
+  double? _findAdjacentKeyframe(
+    List<double> keyframes,
+    double current, {
+    required bool next,
+  }) {
+    if (next) {
+      for (final kf in keyframes) {
+        if (kf > current + 0.02) return kf;
+      }
+    } else {
+      for (int i = keyframes.length - 1; i >= 0; i--) {
+        if (keyframes[i] < current - 0.02) return keyframes[i];
+      }
+    }
+    return null;
   }
 
   int get _startFrame => (_startSeconds * _fps).round().clamp(0, _totalFrames);
@@ -758,7 +770,7 @@ class _TrimPageState extends State<TrimPage> {
             ),
             const SizedBox(width: 12),
             FilterChip(
-              avatar: _isLoadingKeyframes
+              avatar: _isProbingKeyframes
                   ? const SizedBox(
                       width: 14,
                       height: 14,
@@ -766,23 +778,25 @@ class _TrimPageState extends State<TrimPage> {
                     )
                   : const Icon(Icons.key, size: 15),
               label: Text(
-                _isLoadingKeyframes
-                    ? "Scanning keyframes..."
-                    : "Snap to Keyframe (${_keyframes.length})",
+                _isProbingKeyframes
+                    ? "Snapping..."
+                    : "Snap to Nearest Keyframe",
                 style: const TextStyle(fontSize: 11.5),
               ),
               selected: _snapToKeyframe,
               onSelected: _isTrimming
                   ? null
-                  : (selected) {
+                  : (selected) async {
                       setState(() => _snapToKeyframe = selected);
-                      if (selected && _keyframes.isNotEmpty) {
-                        _setStartSeconds(
-                          _snapSecondsToNearestKeyframe(_startSeconds),
+                      if (selected) {
+                        await _snapBoundaryToNearestKeyframe(
+                          isStart: true,
+                          targetSeconds: _startSeconds,
                         );
                         if (_endSeconds < _durationSeconds - 0.1) {
-                          _setEndSeconds(
-                            _snapSecondsToNearestKeyframe(_endSeconds),
+                          await _snapBoundaryToNearestKeyframe(
+                            isStart: false,
+                            targetSeconds: _endSeconds,
                           );
                         }
                       }
@@ -815,32 +829,34 @@ class _TrimPageState extends State<TrimPage> {
                   final startChanged =
                       (values.start - _startSeconds).abs() > 0.001;
                   final endChanged = (values.end - _endSeconds).abs() > 0.001;
-
-                  double newStart = values.start;
-                  double newEnd = values.end;
-
-                  if (_snapToKeyframe && _keyframes.isNotEmpty) {
-                    if (startChanged) {
-                      newStart = _snapSecondsToNearestKeyframe(newStart);
-                    }
-                    if (endChanged && newEnd < _durationSeconds - 0.05) {
-                      newEnd = _snapSecondsToNearestKeyframe(newEnd);
-                    }
-                  }
-
-                  newEnd = math.max(
-                    newEnd,
-                    math.min(_durationSeconds, newStart + _minGapSeconds),
+                  final newEnd = math.max(
+                    values.end,
+                    math.min(_durationSeconds, values.start + _minGapSeconds),
                   );
 
                   setState(() {
-                    _startSeconds = newStart;
+                    _startSeconds = values.start;
                     _endSeconds = newEnd;
                     _hasTrimmed = false;
                     _syncControllers();
                   });
                   if (startChanged) _scheduleFramePreview(isStart: true);
                   if (endChanged) _scheduleFramePreview(isStart: false);
+                },
+          onChangeEnd: _isTrimming || !_snapToKeyframe
+              ? null
+              : (values) async {
+                  // Snap on release via on-demand local -read_intervals probe.
+                  await _snapBoundaryToNearestKeyframe(
+                    isStart: true,
+                    targetSeconds: values.start,
+                  );
+                  if (values.end < _durationSeconds - 0.05) {
+                    await _snapBoundaryToNearestKeyframe(
+                      isStart: false,
+                      targetSeconds: values.end,
+                    );
+                  }
                 },
         ),
         const SizedBox(height: 8),

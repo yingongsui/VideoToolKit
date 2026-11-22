@@ -177,13 +177,19 @@ class VideoService {
     );
   }
 
-  static Future<List<double>> getKeyframes(
+  /// Returns simulated keyframe timestamps within a local window around [centerSeconds].
+  static Future<List<double>> getKeyframesNear(
     String videoPath, {
+    required double centerSeconds,
+    double windowSeconds = 15.0,
     double durationSeconds = 120.0,
   }) async {
-    await Future.delayed(const Duration(milliseconds: 120));
+    await Future.delayed(const Duration(milliseconds: 60));
     final dur = durationSeconds > 0 ? durationSeconds : 120.0;
-    return [for (double t = 0.0; t < dur; t += 4.0) t];
+    final minT = (centerSeconds - windowSeconds).clamp(0.0, dur);
+    final maxT = (centerSeconds + windowSeconds).clamp(0.0, dur);
+    final firstKf = (minT / 4.0).floor() * 4.0;
+    return [for (double t = firstKf; t <= maxT && t < dur; t += 4.0) t];
   }
 
   static Future<String?> extractFrameAtTime(
