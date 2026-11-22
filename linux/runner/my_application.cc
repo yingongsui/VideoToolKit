@@ -50,8 +50,8 @@ static void apply_libadwaita_header_bar_style(GtkWindow* window,
   static const gchar* kLibadwaitaHeaderBarCss =
       "headerbar.adw-flat-headerbar,"
       "headerbar.adw-flat-headerbar.titlebar {"
-      "  min-height: 32px;"
-      "  padding: 3px 10px;"
+      "  min-height: 28px;"
+      "  padding: 2px 10px;"
       "  background-image: none;"
       "  background-color: @theme_bg_color;"
       "  color: @theme_fg_color;"
@@ -68,15 +68,15 @@ static void apply_libadwaita_header_bar_style(GtkWindow* window,
       "  box-shadow: none;"
       "}"
       "headerbar.adw-flat-headerbar .adw-header-title {"
-      "  font-size: 12.5px;"
+      "  font-size: 12px;"
       "  font-weight: 600;"
       "  letter-spacing: 0.2px;"
       "  padding: 0;"
       "}"
       "headerbar.adw-flat-headerbar button,"
       "headerbar.adw-flat-headerbar button.titlebutton {"
-      "  min-height: 24px;"
-      "  min-width: 24px;"
+      "  min-height: 22px;"
+      "  min-width: 22px;"
       "  margin: 0 2px;"
       "  padding: 2px;"
       "  border-radius: 999px;"
@@ -130,7 +130,7 @@ static GtkWidget* build_header_title_widget(const gchar* icon_path) {
 
   if (icon_path != nullptr) {
     GdkPixbuf* pixbuf =
-        gdk_pixbuf_new_from_file_at_scale(icon_path, 18, 18, TRUE, nullptr);
+        gdk_pixbuf_new_from_file_at_scale(icon_path, 16, 16, TRUE, nullptr);
     if (pixbuf != nullptr) {
       GtkWidget* icon_image = gtk_image_new_from_pixbuf(pixbuf);
       g_object_unref(pixbuf);
