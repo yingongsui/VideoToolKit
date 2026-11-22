@@ -68,7 +68,7 @@ static void apply_libadwaita_header_bar_style(GtkWindow* window,
       "  box-shadow: none;"
       "}"
       "headerbar.adw-flat-headerbar .title {"
-      "  font-size: 22px;"
+      "  font-size: 16px;"
       "  font-weight: 700;"
       "  letter-spacing: 0.2px;"
       "  padding: 0;"
