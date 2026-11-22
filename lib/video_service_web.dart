@@ -71,6 +71,9 @@ class VideoService {
   /// Indicates whether the service is running in Web mock preview mode.
   static const bool isWebPreview = true;
 
+  /// Diagnostic error field (always null in Web mock preview mode).
+  static String? lastThumbnailError;
+
   // Mock library folders and files (includes extra extensions like .rmvb/.m2ts
   // so custom extension filtering can be tested directly in Web preview).
   static const Map<String, List<String>> _mockLibrary = {

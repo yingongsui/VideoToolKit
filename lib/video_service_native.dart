@@ -33,6 +33,9 @@ class VideoService {
   /// Indicates whether the service is running in Web mock preview mode.
   static const bool isWebPreview = false;
 
+  /// Stores the most recent thumbnail error message for diagnostics/tooltips.
+  static String? lastThumbnailError;
+
   // Serializes FFmpeg/FFprobe background tasks to avoid native concurrency failures.
   static Future<void> _taskQueue = Future.value();
 
@@ -47,6 +50,21 @@ class VideoService {
       }
     });
     return completer.future;
+  }
+
+  /// Returns an existing, writable cache directory (creates it if missing on macOS).
+  static Future<Directory> _getWritableCacheDir() async {
+    Directory baseDir;
+    try {
+      baseDir = await getTemporaryDirectory();
+    } catch (_) {
+      baseDir = Directory.systemTemp;
+    }
+    final cacheDir = Directory('${baseDir.path}/video_merger_cache');
+    if (!await cacheDir.exists()) {
+      await cacheDir.create(recursive: true);
+    }
+    return cacheDir;
   }
 
   /// Default initial folders (empty on native; user picks real directories).
@@ -123,7 +141,7 @@ class VideoService {
   }) async {
     return _enqueue(() async {
       try {
-        final cacheDir = await getTemporaryDirectory();
+        final cacheDir = await _getWritableCacheDir();
 
         // Sample at 10% of total frames so both short and long videos get a representative frame.
         final int sampledFrame = (totalFrames != null && totalFrames > 0)
@@ -169,8 +187,9 @@ class VideoService {
           return jpgPath;
         }
 
+        final jpgErr = await session.getOutput() ?? "Unknown FFmpeg error";
         debugPrint(
-          "[VideoService] JPEG thumbnail failed for '$videoPath': ${await session.getOutput()}",
+          "[VideoService] JPEG thumbnail failed for '$videoPath': $jpgErr",
         );
 
         // Fallback to PNG from the first frame (avoids MJPEG pixel-format restrictions).
@@ -199,10 +218,13 @@ class VideoService {
           return pngPath;
         }
 
+        final pngErr = await fallbackSession.getOutput() ?? "Unknown FFmpeg error";
+        lastThumbnailError = pngErr.trim().split('\n').last;
         debugPrint(
-          "[VideoService] PNG fallback thumbnail failed for '$videoPath': ${await fallbackSession.getOutput()}",
+          "[VideoService] PNG fallback thumbnail failed for '$videoPath': $pngErr",
         );
       } catch (e) {
+        lastThumbnailError = e.toString();
         debugPrint("[VideoService] Thumbnail generation error: $e");
       }
       return null;
@@ -298,10 +320,10 @@ class VideoService {
               pixelFormat = pixFmt;
             }
 
-            // Extract codec profile (e.g. "High", "Main", "Main 10").
+            // Extract codec profile (normalize numeric H.264/HEVC IDs like 77 -> Main).
             final profile = props?['profile']?.toString();
             if (profile != null && profile.isNotEmpty) {
-              videoProfile = profile;
+              videoProfile = _normalizeProfileName(vCodec, profile);
             }
 
             // Parse numeric FPS from r_frame_rate or avg_frame_rate.
@@ -383,7 +405,7 @@ class VideoService {
   }) async {
     if (filePaths.isEmpty) return null;
 
-    final cacheDir = await getTemporaryDirectory();
+    final cacheDir = await _getWritableCacheDir();
     final listFile = File(
       '${cacheDir.path}/merge_list_${DateTime.now().millisecondsSinceEpoch}.txt',
     );
@@ -460,7 +482,7 @@ class VideoService {
   }) async {
     return _enqueue(() async {
       try {
-        final cacheDir = await getTemporaryDirectory();
+        final cacheDir = await _getWritableCacheDir();
         final key = frameNumber != null
             ? "f$frameNumber"
             : "ms${(timestampSeconds * 1000).round()}";
@@ -631,6 +653,37 @@ class VideoService {
       return "${rounded.toInt()} FPS";
     }
     return "${fps.toStringAsFixed(2)} FPS";
+  }
+
+  static String _normalizeProfileName(String codec, String rawProfile) {
+    if (codec == 'H264' || codec == 'AVC') {
+      switch (rawProfile) {
+        case '66':
+          return 'Baseline';
+        case '77':
+          return 'Main';
+        case '88':
+          return 'Extended';
+        case '100':
+          return 'High';
+        case '110':
+          return 'High 10';
+        case '122':
+          return 'High 4:2:2';
+        case '244':
+          return 'High 4:4:4';
+      }
+    } else if (codec == 'HEVC' || codec == 'H265') {
+      switch (rawProfile) {
+        case '1':
+          return 'Main';
+        case '2':
+          return 'Main 10';
+        case '3':
+          return 'Main Still Picture';
+      }
+    }
+    return rawProfile;
   }
 
   static String _escapeConcatPath(String input) {

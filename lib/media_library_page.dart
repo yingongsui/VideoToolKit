@@ -701,13 +701,17 @@ class _MediaLibraryPageState extends State<MediaLibraryPage> {
                       fit: BoxFit.cover,
                     )
                   else
-                    Container(
-                      color: isDark ? Colors.grey[850] : Colors.grey[200],
-                      child: Center(
-                        child: Icon(
-                          Icons.movie_outlined,
-                          size: 36,
-                          color: colorScheme.primary,
+                    Tooltip(
+                      message: VideoService.lastThumbnailError ??
+                          "Loading thumbnail...",
+                      child: Container(
+                        color: isDark ? Colors.grey[850] : Colors.grey[200],
+                        child: Center(
+                          child: Icon(
+                            Icons.movie_outlined,
+                            size: 36,
+                            color: colorScheme.primary,
+                          ),
                         ),
                       ),
                     ),
