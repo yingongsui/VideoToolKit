@@ -34,81 +34,44 @@ static gchar* get_bundled_icon_path() {
   return icon_path;
 }
 
-// Applies a modern GNOME / Libadwaita flat minimalist style to Ubuntu's GtkHeaderBar.
-// Uses GTK semantic color variables so it adapts automatically to light & dark themes.
-static void apply_libadwaita_header_bar_style(GtkWindow* window,
-                                              GtkHeaderBar* header_bar) {
+// Reduce Ubuntu/GNOME GtkHeaderBar padding and height so the window title bar
+// stays compact while preserving native Wayland/X11 window controls and theme.
+static void apply_compact_header_bar_style(GtkWindow* window,
+                                           GtkHeaderBar* header_bar) {
   gtk_style_context_add_class(
       gtk_widget_get_style_context(GTK_WIDGET(header_bar)),
-      "adw-flat-headerbar");
+      "compact-headerbar");
 
   static gboolean css_registered = FALSE;
   if (css_registered) {
     return;
   }
 
-  static const gchar* kLibadwaitaHeaderBarCss =
-      "headerbar.adw-flat-headerbar,"
-      "headerbar.adw-flat-headerbar.titlebar {"
+  static const gchar* kCompactHeaderBarCss =
+      "headerbar.compact-headerbar,"
+      "headerbar.compact-headerbar.titlebar {"
       "  min-height: 28px;"
-      "  padding: 2px 10px;"
-      "  background-image: none;"
-      "  background-color: @theme_bg_color;"
-      "  color: @theme_fg_color;"
-      "  border: none;"
-      "  border-bottom: 1px solid alpha(@theme_fg_color, 0.10);"
-      "  box-shadow: none;"
+      "  padding-top: 2px;"
+      "  padding-bottom: 2px;"
+      "  padding-left: 8px;"
+      "  padding-right: 8px;"
       "}"
-      "headerbar.adw-flat-headerbar:backdrop,"
-      "headerbar.adw-flat-headerbar.titlebar:backdrop {"
-      "  background-image: none;"
-      "  background-color: @theme_bg_color;"
-      "  color: alpha(@theme_fg_color, 0.55);"
-      "  border-bottom: 1px solid alpha(@theme_fg_color, 0.06);"
-      "  box-shadow: none;"
+      "headerbar.compact-headerbar .title {"
+      "  padding-top: 0;"
+      "  padding-bottom: 0;"
       "}"
-      "headerbar.adw-flat-headerbar .title {"
-      "  font-size: 16px;"
-      "  font-weight: 700;"
-      "  letter-spacing: 0.2px;"
-      "  padding: 0;"
-      "}"
-      "headerbar.adw-flat-headerbar button,"
-      "headerbar.adw-flat-headerbar button.titlebutton {"
+      "headerbar.compact-headerbar button,"
+      "headerbar.compact-headerbar button.titlebutton {"
       "  min-height: 22px;"
       "  min-width: 22px;"
-      "  margin: 0 2px;"
+      "  margin-top: 0;"
+      "  margin-bottom: 0;"
       "  padding: 2px;"
-      "  border-radius: 999px;"
-      "  border: none;"
-      "  box-shadow: none;"
-      "  background-image: none;"
-      "  background-color: transparent;"
-      "  color: alpha(@theme_fg_color, 0.85);"
-      "  transition: background-color 140ms ease, color 140ms ease;"
-      "}"
-      "headerbar.adw-flat-headerbar button.titlebutton:hover {"
-      "  background-color: alpha(@theme_fg_color, 0.10);"
-      "  color: @theme_fg_color;"
-      "}"
-      "headerbar.adw-flat-headerbar button.titlebutton:active {"
-      "  background-color: alpha(@theme_fg_color, 0.16);"
-      "}"
-      "headerbar.adw-flat-headerbar button.titlebutton.close:hover {"
-      "  background-color: #e01b24;"
-      "  color: #ffffff;"
-      "}"
-      "headerbar.adw-flat-headerbar button.titlebutton.close:active {"
-      "  background-color: #c01c28;"
-      "  color: #ffffff;"
-      "}"
-      "headerbar.adw-flat-headerbar button.titlebutton:backdrop {"
-      "  color: alpha(@theme_fg_color, 0.45);"
       "}";
 
   GtkCssProvider* css_provider = gtk_css_provider_new();
   g_autoptr(GError) error = nullptr;
-  if (gtk_css_provider_load_from_data(css_provider, kLibadwaitaHeaderBarCss, -1,
+  if (gtk_css_provider_load_from_data(css_provider, kCompactHeaderBarCss, -1,
                                       &error)) {
     GdkScreen* screen = gtk_window_get_screen(window);
     if (screen != nullptr) {
@@ -118,7 +81,7 @@ static void apply_libadwaita_header_bar_style(GtkWindow* window,
       css_registered = TRUE;
     }
   } else if (error != nullptr) {
-    g_warning("Failed to load Libadwaita header bar CSS: %s", error->message);
+    g_warning("Failed to load compact header bar CSS: %s", error->message);
   }
   g_object_unref(css_provider);
 }
@@ -157,7 +120,7 @@ static void my_application_activate(GApplication* application) {
     gtk_header_bar_set_title(header_bar, "VideoToolKit");
     gtk_header_bar_set_has_subtitle(header_bar, FALSE);
     gtk_header_bar_set_show_close_button(header_bar, TRUE);
-    apply_libadwaita_header_bar_style(window, header_bar);
+    apply_compact_header_bar_style(window, header_bar);
     gtk_window_set_titlebar(window, GTK_WIDGET(header_bar));
   } else {
     gtk_window_set_title(window, "VideoToolKit");
