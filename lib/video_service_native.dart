@@ -151,7 +151,7 @@ class VideoService {
 
     return _extractFrameImage(
       videoPath: videoPath,
-      cacheKey: "thumb_v2_${videoPath.hashCode}_10pct_f$sampledFrame",
+      cacheKey: "thumb_v3_${videoPath.hashCode}_10pct_f$sampledFrame",
       scaleWidth: 480,
       seekSeconds: seekSeconds,
       allowFirstFrameFallback: true,
@@ -170,14 +170,14 @@ class VideoService {
 
     return _extractFrameImage(
       videoPath: videoPath,
-      cacheKey: "trim_v2_${videoPath.hashCode}_$key",
+      cacheKey: "trim_v3_${videoPath.hashCode}_$key",
       scaleWidth: 960,
       seekSeconds: timestampSeconds,
       allowFirstFrameFallback: false,
     );
   }
 
-  /// Shared JPEG + PNG fallback frame extraction helper.
+  /// Shared JPEG + PNG fallback frame extraction helper compatible with FFmpeg 6/7/8.
   static Future<String?> _extractFrameImage({
     required String videoPath,
     required String cacheKey,
@@ -194,35 +194,44 @@ class VideoService {
           return jpgPath;
         }
 
-        // Convert to full-range yuvj420p with -strict unofficial for MJPEG compatibility.
+        // Primary attempt: raw MJPEG single-frame muxer (-f mjpeg avoids FFmpeg 8
+        // image2 sequence-pattern errors; -color_range pc + yuv420p avoids deprecated yuvj420p).
         final jpgArgs = <String>[
           '-y',
           if (seekSeconds > 0) ...['-ss', seekSeconds.toStringAsFixed(3)],
           '-i',
           videoPath,
+          '-an',
+          '-sn',
+          '-dn',
           '-frames:v',
           '1',
           '-vf',
-          'scale=$scaleWidth:-2,format=yuvj420p',
+          'scale=$scaleWidth:-2',
+          '-pix_fmt',
+          'yuv420p',
+          '-color_range',
+          'pc',
           '-strict',
           'unofficial',
           '-q:v',
           '3',
+          '-f',
+          'mjpeg',
           jpgPath,
         ];
 
         final session = await FFmpegKit.executeWithArguments(jpgArgs);
-        if (ReturnCode.isSuccess(await session.getReturnCode()) &&
-            await jpgFile.exists() &&
-            await jpgFile.length() > 0) {
+        if (await jpgFile.exists() && await jpgFile.length() > 0) {
           return jpgPath;
         }
 
+        final jpgErr = await session.getOutput() ?? "Unknown FFmpeg error";
         debugPrint(
-          "[VideoService] JPEG extraction failed for '$videoPath': ${await session.getOutput()}",
+          "[VideoService] JPEG extraction failed for '$videoPath': $jpgErr",
         );
 
-        // Fallback to PNG (avoids MJPEG pixel-format restrictions).
+        // Fallback 1: PNG via image2 with -update 1 (compatible with FFmpeg 8.x).
         final pngPath = "${cacheDir.path}/${cacheKey}_fallback.png";
         final pngFile = File(pngPath);
         if (await pngFile.exists() && await pngFile.length() > 0) {
@@ -237,22 +246,48 @@ class VideoService {
           ],
           '-i',
           videoPath,
+          '-an',
+          '-sn',
+          '-dn',
           '-frames:v',
           '1',
           '-vf',
           'scale=$scaleWidth:-2',
+          '-c:v',
+          'png',
+          '-pix_fmt',
+          'rgb24',
+          '-f',
+          'image2',
+          '-update',
+          '1',
           pngPath,
         ];
         final fallbackSession = await FFmpegKit.executeWithArguments(pngArgs);
-        if (ReturnCode.isSuccess(await fallbackSession.getReturnCode()) &&
-            await pngFile.exists() &&
-            await pngFile.length() > 0) {
+        if (await pngFile.exists() && await pngFile.length() > 0) {
           return pngPath;
         }
 
+        // Fallback 2: System ffmpeg CLI on Linux if bundled FFmpegKit failed.
+        if (Platform.isLinux) {
+          try {
+            final proc = await Process.run('ffmpeg', pngArgs);
+            if (proc.exitCode == 0 &&
+                await pngFile.exists() &&
+                await pngFile.length() > 0) {
+              return pngPath;
+            }
+          } catch (_) {}
+        }
+
         final pngErr =
-            await fallbackSession.getOutput() ?? "Unknown FFmpeg error";
-        lastThumbnailError = pngErr.trim().split('\n').last;
+            await fallbackSession.getOutput() ?? jpgErr;
+        lastThumbnailError = pngErr
+            .trim()
+            .split('\n')
+            .where((l) => l.trim().isNotEmpty)
+            .lastOrNull ??
+            "Thumbnail extraction failed";
         debugPrint(
           "[VideoService] PNG fallback failed for '$videoPath': $pngErr",
         );

@@ -199,7 +199,7 @@ class _MediaLibraryPageState extends State<MediaLibraryPage> {
         totalFrames: meta.totalFrames,
         durationSeconds: meta.durationSeconds,
       ).then((thumb) {
-        if (mounted && thumb != null) {
+        if (mounted) {
           setState(() => item.thumbPath = thumb);
         }
       });

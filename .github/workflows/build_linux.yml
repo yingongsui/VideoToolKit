@@ -66,8 +66,16 @@ jobs:
           cp -R build/linux/x64/release/bundle/* "${PKG_DIR}/opt/videotoolkit/"
           chmod 0755 "${PKG_DIR}/opt/videotoolkit/VideoToolKit"
 
+          # Launcher wrapper ensures bundled libffmpegkit.so is always found by dlopen()
+          cat << 'EOF' > "${PKG_DIR}/opt/videotoolkit/launch.sh"
+          #!/usr/bin/env bash
+          export LD_LIBRARY_PATH="/opt/videotoolkit/lib:${LD_LIBRARY_PATH:-}"
+          exec /opt/videotoolkit/VideoToolKit "$@"
+          EOF
+          chmod 0755 "${PKG_DIR}/opt/videotoolkit/launch.sh"
+
           # Create CLI symlink
-          ln -s /opt/videotoolkit/VideoToolKit "${PKG_DIR}/usr/bin/videotoolkit"
+          ln -s /opt/videotoolkit/launch.sh "${PKG_DIR}/usr/bin/videotoolkit"
 
           # Install application icon
           if [ -f "assets/icon/icon.png" ]; then
@@ -79,7 +87,7 @@ jobs:
           [Desktop Entry]
           Name=VideoToolKit
           Comment=Desktop video media library, lossless merger, and trimmer
-          Exec=/opt/videotoolkit/VideoToolKit
+          Exec=/opt/videotoolkit/launch.sh
           Icon=videotoolkit
           Terminal=false
           Type=Application
