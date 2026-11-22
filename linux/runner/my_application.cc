@@ -19,44 +19,96 @@ static void first_frame_cb(MyApplication* self, FlView* view) {
   gtk_widget_show(gtk_widget_get_toplevel(GTK_WIDGET(view)));
 }
 
-// Reduce Ubuntu/GNOME GtkHeaderBar padding and height so the window title bar
-// stays compact while preserving Wayland/X11 window controls.
-static void apply_compact_header_bar_style(GtkWindow* window,
-                                           GtkHeaderBar* header_bar) {
+// Resolves <executable_dir>/data/icon.png if present; caller owns returned string.
+static gchar* get_bundled_icon_path() {
+  g_autofree gchar* exe_path = g_file_read_link("/proc/self/exe", nullptr);
+  if (exe_path == nullptr) {
+    return nullptr;
+  }
+  g_autofree gchar* exe_dir = g_path_get_dirname(exe_path);
+  gchar* icon_path = g_build_filename(exe_dir, "data", "icon.png", nullptr);
+  if (!g_file_test(icon_path, G_FILE_TEST_EXISTS)) {
+    g_free(icon_path);
+    return nullptr;
+  }
+  return icon_path;
+}
+
+// Applies a modern GNOME / Libadwaita flat minimalist style to Ubuntu's GtkHeaderBar.
+// Uses GTK semantic color variables so it adapts automatically to light & dark themes.
+static void apply_libadwaita_header_bar_style(GtkWindow* window,
+                                              GtkHeaderBar* header_bar) {
   gtk_style_context_add_class(
       gtk_widget_get_style_context(GTK_WIDGET(header_bar)),
-      "compact-headerbar");
+      "adw-flat-headerbar");
 
   static gboolean css_registered = FALSE;
   if (css_registered) {
     return;
   }
 
-  static const gchar* kCompactHeaderBarCss =
-      "headerbar.compact-headerbar,"
-      "headerbar.compact-headerbar.titlebar {"
-      "  min-height: 28px;"
-      "  padding-top: 2px;"
-      "  padding-bottom: 2px;"
-      "  padding-left: 8px;"
-      "  padding-right: 8px;"
+  static const gchar* kLibadwaitaHeaderBarCss =
+      "headerbar.adw-flat-headerbar,"
+      "headerbar.adw-flat-headerbar.titlebar {"
+      "  min-height: 32px;"
+      "  padding: 3px 10px;"
+      "  background-image: none;"
+      "  background-color: @theme_bg_color;"
+      "  color: @theme_fg_color;"
+      "  border: none;"
+      "  border-bottom: 1px solid alpha(@theme_fg_color, 0.10);"
+      "  box-shadow: none;"
       "}"
-      "headerbar.compact-headerbar .title {"
-      "  padding-top: 0;"
-      "  padding-bottom: 0;"
+      "headerbar.adw-flat-headerbar:backdrop,"
+      "headerbar.adw-flat-headerbar.titlebar:backdrop {"
+      "  background-image: none;"
+      "  background-color: @theme_bg_color;"
+      "  color: alpha(@theme_fg_color, 0.55);"
+      "  border-bottom: 1px solid alpha(@theme_fg_color, 0.06);"
+      "  box-shadow: none;"
       "}"
-      "headerbar.compact-headerbar button,"
-      "headerbar.compact-headerbar button.titlebutton {"
-      "  min-height: 22px;"
-      "  min-width: 22px;"
-      "  margin-top: 0;"
-      "  margin-bottom: 0;"
+      "headerbar.adw-flat-headerbar .adw-header-title {"
+      "  font-size: 12.5px;"
+      "  font-weight: 600;"
+      "  letter-spacing: 0.2px;"
+      "  padding: 0;"
+      "}"
+      "headerbar.adw-flat-headerbar button,"
+      "headerbar.adw-flat-headerbar button.titlebutton {"
+      "  min-height: 24px;"
+      "  min-width: 24px;"
+      "  margin: 0 2px;"
       "  padding: 2px;"
+      "  border-radius: 999px;"
+      "  border: none;"
+      "  box-shadow: none;"
+      "  background-image: none;"
+      "  background-color: transparent;"
+      "  color: alpha(@theme_fg_color, 0.85);"
+      "  transition: background-color 140ms ease, color 140ms ease;"
+      "}"
+      "headerbar.adw-flat-headerbar button.titlebutton:hover {"
+      "  background-color: alpha(@theme_fg_color, 0.10);"
+      "  color: @theme_fg_color;"
+      "}"
+      "headerbar.adw-flat-headerbar button.titlebutton:active {"
+      "  background-color: alpha(@theme_fg_color, 0.16);"
+      "}"
+      "headerbar.adw-flat-headerbar button.titlebutton.close:hover {"
+      "  background-color: #e01b24;"
+      "  color: #ffffff;"
+      "}"
+      "headerbar.adw-flat-headerbar button.titlebutton.close:active {"
+      "  background-color: #c01c28;"
+      "  color: #ffffff;"
+      "}"
+      "headerbar.adw-flat-headerbar button.titlebutton:backdrop {"
+      "  color: alpha(@theme_fg_color, 0.45);"
       "}";
 
   GtkCssProvider* css_provider = gtk_css_provider_new();
   g_autoptr(GError) error = nullptr;
-  if (gtk_css_provider_load_from_data(css_provider, kCompactHeaderBarCss, -1,
+  if (gtk_css_provider_load_from_data(css_provider, kLibadwaitaHeaderBarCss, -1,
                                       &error)) {
     GdkScreen* screen = gtk_window_get_screen(window);
     if (screen != nullptr) {
@@ -66,9 +118,33 @@ static void apply_compact_header_bar_style(GtkWindow* window,
       css_registered = TRUE;
     }
   } else if (error != nullptr) {
-    g_warning("Failed to load compact header bar CSS: %s", error->message);
+    g_warning("Failed to load Libadwaita header bar CSS: %s", error->message);
   }
   g_object_unref(css_provider);
+}
+
+// Builds a centered icon + title widget for the header bar.
+static GtkWidget* build_header_title_widget(const gchar* icon_path) {
+  GtkWidget* box = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 7);
+  gtk_widget_set_valign(box, GTK_ALIGN_CENTER);
+
+  if (icon_path != nullptr) {
+    GdkPixbuf* pixbuf =
+        gdk_pixbuf_new_from_file_at_scale(icon_path, 18, 18, TRUE, nullptr);
+    if (pixbuf != nullptr) {
+      GtkWidget* icon_image = gtk_image_new_from_pixbuf(pixbuf);
+      g_object_unref(pixbuf);
+      gtk_box_pack_start(GTK_BOX(box), icon_image, FALSE, FALSE, 0);
+    }
+  }
+
+  GtkWidget* label = gtk_label_new("VideoToolKit");
+  gtk_style_context_add_class(gtk_widget_get_style_context(label),
+                              "adw-header-title");
+  gtk_box_pack_start(GTK_BOX(box), label, FALSE, FALSE, 0);
+
+  gtk_widget_show_all(box);
+  return box;
 }
 
 // Implements GApplication::activate.
@@ -76,6 +152,11 @@ static void my_application_activate(GApplication* application) {
   MyApplication* self = MY_APPLICATION(application);
   GtkWindow* window =
       GTK_WINDOW(gtk_application_window_new(GTK_APPLICATION(application)));
+
+  g_autofree gchar* icon_path = get_bundled_icon_path();
+  if (icon_path != nullptr) {
+    gtk_window_set_icon_from_file(window, icon_path, nullptr);
+  }
 
   // Use a header bar when running in GNOME as this is the common style used
   // by applications and is the setup most users will be using (e.g. Ubuntu
@@ -97,24 +178,14 @@ static void my_application_activate(GApplication* application) {
   if (use_header_bar) {
     GtkHeaderBar* header_bar = GTK_HEADER_BAR(gtk_header_bar_new());
     gtk_widget_show(GTK_WIDGET(header_bar));
-    gtk_header_bar_set_title(header_bar, "VideoToolKit");
     gtk_header_bar_set_has_subtitle(header_bar, FALSE);
     gtk_header_bar_set_show_close_button(header_bar, TRUE);
-    apply_compact_header_bar_style(window, header_bar);
+    gtk_header_bar_set_custom_title(header_bar,
+                                    build_header_title_widget(icon_path));
+    apply_libadwaita_header_bar_style(window, header_bar);
     gtk_window_set_titlebar(window, GTK_WIDGET(header_bar));
   } else {
     gtk_window_set_title(window, "VideoToolKit");
-  }
-
-  // Load bundled application icon from <executable_dir>/data/icon.png when present.
-  g_autofree gchar* exe_path = g_file_read_link("/proc/self/exe", nullptr);
-  if (exe_path != nullptr) {
-    g_autofree gchar* exe_dir = g_path_get_dirname(exe_path);
-    g_autofree gchar* icon_path =
-        g_build_filename(exe_dir, "data", "icon.png", nullptr);
-    if (g_file_test(icon_path, G_FILE_TEST_EXISTS)) {
-      gtk_window_set_icon_from_file(window, icon_path, nullptr);
-    }
   }
 
   gtk_window_set_default_size(window, 1280, 720);
