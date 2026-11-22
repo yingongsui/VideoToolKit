@@ -54,6 +54,14 @@ jobs:
       - name: Package Ubuntu .deb installer
         run: |
           APP_VERSION=$(grep '^version:' pubspec.yaml | awk '{print $2}' | cut -d'+' -f1)
+          if [[ "${GITHUB_REF}" == refs/tags/v* ]]; then
+            RELEASE_TAG="${GITHUB_REF_NAME}"
+          else
+            RELEASE_TAG="v${APP_VERSION}"
+          fi
+          echo "APP_VERSION=${APP_VERSION}" >> "$GITHUB_ENV"
+          echo "RELEASE_TAG=${RELEASE_TAG}" >> "$GITHUB_ENV"
+
           PKG_DIR="dist/deb_pkg"
 
           mkdir -p "${PKG_DIR}/DEBIAN"
@@ -106,15 +114,9 @@ jobs:
 
           dpkg-deb --build --root-owner-group "${PKG_DIR}" "dist/VideoToolKit-${APP_VERSION}-amd64.deb"
 
-      - name: Upload Ubuntu .deb artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: VideoToolKit-ubuntu-amd64-deb
-          path: dist/*.deb
-          retention-days: 14
-
-      - name: Create GitHub Release (on version tag)
-        if: startsWith(github.ref, 'refs/tags/v')
+      - name: Publish direct .deb download to GitHub Release
         uses: softprops/action-gh-release@v2
         with:
-          files: dist/*.deb
+          tag_name: ${{ env.RELEASE_TAG }}
+          name: VideoToolKit ${{ env.RELEASE_TAG }}
+          files: dist/VideoToolKit-${{ env.APP_VERSION }}-amd64.deb

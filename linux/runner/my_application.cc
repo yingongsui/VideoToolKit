@@ -67,7 +67,7 @@ static void apply_libadwaita_header_bar_style(GtkWindow* window,
       "  border-bottom: 1px solid alpha(@theme_fg_color, 0.06);"
       "  box-shadow: none;"
       "}"
-      "headerbar.adw-flat-headerbar .adw-header-title {"
+      "headerbar.adw-flat-headerbar .title {"
       "  font-size: 12px;"
       "  font-weight: 600;"
       "  letter-spacing: 0.2px;"
@@ -123,30 +123,6 @@ static void apply_libadwaita_header_bar_style(GtkWindow* window,
   g_object_unref(css_provider);
 }
 
-// Builds a centered icon + title widget for the header bar.
-static GtkWidget* build_header_title_widget(const gchar* icon_path) {
-  GtkWidget* box = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 7);
-  gtk_widget_set_valign(box, GTK_ALIGN_CENTER);
-
-  if (icon_path != nullptr) {
-    GdkPixbuf* pixbuf =
-        gdk_pixbuf_new_from_file_at_scale(icon_path, 16, 16, TRUE, nullptr);
-    if (pixbuf != nullptr) {
-      GtkWidget* icon_image = gtk_image_new_from_pixbuf(pixbuf);
-      g_object_unref(pixbuf);
-      gtk_box_pack_start(GTK_BOX(box), icon_image, FALSE, FALSE, 0);
-    }
-  }
-
-  GtkWidget* label = gtk_label_new("VideoToolKit");
-  gtk_style_context_add_class(gtk_widget_get_style_context(label),
-                              "adw-header-title");
-  gtk_box_pack_start(GTK_BOX(box), label, FALSE, FALSE, 0);
-
-  gtk_widget_show_all(box);
-  return box;
-}
-
 // Implements GApplication::activate.
 static void my_application_activate(GApplication* application) {
   MyApplication* self = MY_APPLICATION(application);
@@ -178,10 +154,9 @@ static void my_application_activate(GApplication* application) {
   if (use_header_bar) {
     GtkHeaderBar* header_bar = GTK_HEADER_BAR(gtk_header_bar_new());
     gtk_widget_show(GTK_WIDGET(header_bar));
+    gtk_header_bar_set_title(header_bar, "VideoToolKit");
     gtk_header_bar_set_has_subtitle(header_bar, FALSE);
     gtk_header_bar_set_show_close_button(header_bar, TRUE);
-    gtk_header_bar_set_custom_title(header_bar,
-                                    build_header_title_widget(icon_path));
     apply_libadwaita_header_bar_style(window, header_bar);
     gtk_window_set_titlebar(window, GTK_WIDGET(header_bar));
   } else {

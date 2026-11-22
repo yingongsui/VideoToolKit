@@ -1,8 +1,7 @@
 name: Build macOS Desktop App
 
 on:
-  # Trigger manually from GitHub Actions tab or when pushing a version tag (e.g. v1.0.0).
-  # Avoids running a slow macOS build on every routine commit.
+  # Trigger manually from GitHub Actions tab or when pushing a version tag (e.g. v1.2.0).
   workflow_dispatch:
   push:
     tags:
@@ -52,6 +51,15 @@ jobs:
 
       - name: Package .dmg
         run: |
+          APP_VERSION=$(grep '^version:' pubspec.yaml | awk '{print $2}' | cut -d'+' -f1)
+          if [[ "${GITHUB_REF}" == refs/tags/v* ]]; then
+            RELEASE_TAG="${GITHUB_REF_NAME}"
+          else
+            RELEASE_TAG="v${APP_VERSION}"
+          fi
+          echo "APP_VERSION=${APP_VERSION}" >> "$GITHUB_ENV"
+          echo "RELEASE_TAG=${RELEASE_TAG}" >> "$GITHUB_ENV"
+
           mkdir -p dist/dmg_stage
           cp -R "build/macos/Build/Products/Release/VideoToolKit.app" dist/dmg_stage/
           ln -s /Applications dist/dmg_stage/Applications
@@ -60,17 +68,11 @@ jobs:
             -srcfolder dist/dmg_stage \
             -ov \
             -format UDZO \
-            dist/VideoToolKit-macos.dmg
+            "dist/VideoToolKit-${APP_VERSION}-macos.dmg"
 
-      - name: Upload macOS DMG artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: VideoToolKit-macos-dmg
-          path: dist/VideoToolKit-macos.dmg
-          retention-days: 14
-
-      - name: Create GitHub Release (on version tag)
-        if: startsWith(github.ref, 'refs/tags/v')
+      - name: Publish direct .dmg download to GitHub Release
         uses: softprops/action-gh-release@v2
         with:
-          files: dist/VideoToolKit-macos.dmg
+          tag_name: ${{ env.RELEASE_TAG }}
+          name: VideoToolKit ${{ env.RELEASE_TAG }}
+          files: dist/VideoToolKit-${{ env.APP_VERSION }}-macos.dmg
