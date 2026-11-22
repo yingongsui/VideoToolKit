@@ -679,7 +679,7 @@ class _MergePageState extends State<MergePage> {
                           )
                         : const Icon(Icons.merge_type),
                     label: Text(
-                      isMerging ? "Merging ($_mergeSeconds s)" : "Start Concat",
+                      isMerging ? "Merging ($_mergeSeconds s)" : "Merge",
                     ),
                   ),
                 ),
