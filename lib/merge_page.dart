@@ -2,6 +2,7 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'app_settings.dart';
 import 'console_log_panel.dart';
+import 'floating_toast.dart';
 import 'settings_dialog.dart';
 import 'video_service.dart';
 
@@ -144,7 +145,11 @@ class _MergePageState extends State<MergePage> {
       );
     });
     _scrollToBottom();
-    _showSnackBar("Process force-stopped.");
+    showFloatingToast(
+      context,
+      "Process force-stopped.",
+      type: ToastType.warning,
+    );
   }
 
   void _startTimer() {
@@ -694,7 +699,11 @@ class _MergePageState extends State<MergePage> {
 
   Future<void> _startMerge() async {
     if (videoItems.isEmpty) {
-      _showSnackBar("Add at least one video file first.");
+      showFloatingToast(
+        context,
+        "Add at least one video file first.",
+        type: ToastType.warning,
+      );
       return;
     }
 
@@ -755,6 +764,7 @@ class _MergePageState extends State<MergePage> {
     );
 
     _stopTimer();
+    if (!mounted) return;
     setState(() {
       isMerging = false;
       if (outputPath != null) {
@@ -763,23 +773,23 @@ class _MergePageState extends State<MergePage> {
     });
 
     if (outputPath != null) {
-      _showSnackBar(
-        "Merged successfully in $_mergeSeconds seconds.\nSaved to: $outputPath",
+      showFloatingToast(
+        context,
+        "Merged in $_mergeSeconds s • Saved to $outputPath",
+        type: ToastType.success,
+        duration: const Duration(seconds: 4),
       );
     } else {
       if (_consoleLogs.isNotEmpty &&
           _consoleLogs.last.contains("[USER ACTION]")) {
         return;
       }
-      _showSnackBar(
-        "Concatenation failed. Check console logs for stream alignment issues.",
+      showFloatingToast(
+        context,
+        "Concatenation failed. Check console logs.",
+        type: ToastType.error,
+        duration: const Duration(seconds: 4),
       );
     }
-  }
-
-  void _showSnackBar(String message) {
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(content: Text(message), duration: const Duration(seconds: 4)),
-    );
   }
 }

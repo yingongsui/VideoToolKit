@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'app_settings.dart';
+import 'floating_toast.dart';
 import 'merge_page.dart';
 import 'settings_dialog.dart';
 import 'trim_page.dart';
@@ -99,11 +100,15 @@ class _MediaLibraryPageState extends State<MediaLibraryPage> {
     final selectedDir = await VideoService.pickDirectory(
       dialogTitle: "Select Video Folder",
     );
-    if (selectedDir == null) return;
+    if (selectedDir == null || !mounted) return;
 
     if (_folders.contains(selectedDir)) {
       setState(() => _activeFolder = selectedDir);
-      _showSnackBar("Folder is already in the media library.");
+      showFloatingToast(
+        context,
+        "Folder is already in the media library.",
+        type: ToastType.info,
+      );
       return;
     }
 
@@ -286,12 +291,6 @@ class _MediaLibraryPageState extends State<MediaLibraryPage> {
       MaterialPageRoute(
         builder: (context) => TrimPage(videoItem: item),
       ),
-    );
-  }
-
-  void _showSnackBar(String message) {
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(content: Text(message), duration: const Duration(seconds: 3)),
     );
   }
 

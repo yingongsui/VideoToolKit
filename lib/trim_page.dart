@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:math' as math;
 import 'package:flutter/material.dart';
 import 'console_log_panel.dart';
+import 'floating_toast.dart';
 import 'video_service.dart';
 
 // ============================================================================
@@ -299,7 +300,11 @@ class _TrimPageState extends State<TrimPage> {
     final parsed = parseTimecode(text);
     if (parsed == null) {
       _syncControllers();
-      _showSnackBar("Invalid timecode. Use HH:MM:SS.mmm or seconds.");
+      showFloatingToast(
+        context,
+        "Invalid timecode. Use HH:MM:SS.mmm or seconds.",
+        type: ToastType.warning,
+      );
       return;
     }
     if (isStart) {
@@ -313,7 +318,11 @@ class _TrimPageState extends State<TrimPage> {
     final parsed = int.tryParse(text.trim());
     if (parsed == null || parsed < 0) {
       _syncControllers();
-      _showSnackBar("Invalid frame number.");
+      showFloatingToast(
+        context,
+        "Invalid frame number.",
+        type: ToastType.warning,
+      );
       return;
     }
     final clampedFrame = parsed.clamp(0, _totalFrames);
@@ -358,7 +367,11 @@ class _TrimPageState extends State<TrimPage> {
 
   Future<void> _startTrim() async {
     if (_clipDuration <= 0) {
-      _showSnackBar("End point must be after start point.");
+      showFloatingToast(
+        context,
+        "End point must be after start point.",
+        type: ToastType.warning,
+      );
       return;
     }
 
@@ -407,9 +420,19 @@ class _TrimPageState extends State<TrimPage> {
     });
 
     if (result != null) {
-      _showSnackBar("Trimmed in $_trimSeconds s.\nSaved to: $result");
+      showFloatingToast(
+        context,
+        "Trimmed in $_trimSeconds s • Saved to $result",
+        type: ToastType.success,
+        duration: const Duration(seconds: 4),
+      );
     } else if (!_consoleLogs.any((l) => l.contains("[USER ACTION]"))) {
-      _showSnackBar("Trim failed. Check console logs for details.");
+      showFloatingToast(
+        context,
+        "Trim failed. Check console logs.",
+        type: ToastType.error,
+        duration: const Duration(seconds: 4),
+      );
     }
   }
 
@@ -422,7 +445,7 @@ class _TrimPageState extends State<TrimPage> {
       _consoleLogs.add("[USER ACTION] Trim operation stopped by user.");
     });
     _scrollLogsToBottom();
-    _showSnackBar("Trim stopped.");
+    showFloatingToast(context, "Trim stopped.", type: ToastType.warning);
   }
 
   void _scrollLogsToBottom() {
@@ -435,12 +458,6 @@ class _TrimPageState extends State<TrimPage> {
         );
       }
     });
-  }
-
-  void _showSnackBar(String message) {
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(content: Text(message), duration: const Duration(seconds: 4)),
-    );
   }
 
   @override
