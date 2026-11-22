@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:convert';
 import 'dart:io';
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
@@ -11,7 +12,9 @@ import 'app_settings.dart';
 import 'video_models.dart';
 
 // ============================================================================
-// Native Desktop Implementation (macOS / Windows / Linux)
+// Native Desktop Implementation
+// - macOS: uses bundled ffmpeg_kit_flutter_new (zero system dependencies)
+// - Linux: uses system ffmpeg / ffprobe CLI (installed via .deb Depends: ffmpeg)
 // ============================================================================
 
 /// Renders a local image file on native platforms.
@@ -36,7 +39,9 @@ class VideoService {
   /// Stores the most recent thumbnail error message for diagnostics/tooltips.
   static String? lastThumbnailError;
 
-  // Serializes FFmpeg/FFprobe background tasks to avoid native concurrency failures.
+  static Process? _activeCliProcess;
+
+  // Serializes background probe/thumbnail tasks to keep resource usage predictable.
   static Future<void> _taskQueue = Future.value();
 
   static Future<T> _enqueue<T>(Future<T> Function() task) {
@@ -51,7 +56,7 @@ class VideoService {
     return completer.future;
   }
 
-  /// Returns an existing, writable cache directory (creates it if missing on macOS).
+  /// Returns an existing, writable cache directory (creates it if missing).
   static Future<Directory> _getWritableCacheDir() async {
     Directory baseDir;
     try {
@@ -59,7 +64,7 @@ class VideoService {
     } catch (_) {
       baseDir = Directory.systemTemp;
     }
-    final cacheDir = Directory('${baseDir.path}/video_merger_cache');
+    final cacheDir = Directory('${baseDir.path}/videotoolkit_cache');
     if (!await cacheDir.exists()) {
       await cacheDir.create(recursive: true);
     }
@@ -151,10 +156,9 @@ class VideoService {
 
     return _extractFrameImage(
       videoPath: videoPath,
-      cacheKey: "thumb_v3_${videoPath.hashCode}_10pct_f$sampledFrame",
+      fileName: "thumb_${videoPath.hashCode}_f$sampledFrame.jpg",
       scaleWidth: 480,
       seekSeconds: seekSeconds,
-      allowFirstFrameFallback: true,
     );
   }
 
@@ -170,33 +174,29 @@ class VideoService {
 
     return _extractFrameImage(
       videoPath: videoPath,
-      cacheKey: "trim_v3_${videoPath.hashCode}_$key",
+      fileName: "trim_${videoPath.hashCode}_$key.jpg",
       scaleWidth: 960,
       seekSeconds: timestampSeconds,
-      allowFirstFrameFallback: false,
     );
   }
 
-  /// Shared JPEG + PNG fallback frame extraction helper compatible with FFmpeg 6/7/8.
+  /// Extracts a single scaled JPEG frame via system ffmpeg (Linux) or FFmpegKit (macOS).
   static Future<String?> _extractFrameImage({
     required String videoPath,
-    required String cacheKey,
+    required String fileName,
     required int scaleWidth,
     required double seekSeconds,
-    required bool allowFirstFrameFallback,
   }) async {
     return _enqueue(() async {
       try {
         final cacheDir = await _getWritableCacheDir();
-        final jpgPath = "${cacheDir.path}/$cacheKey.jpg";
-        final jpgFile = File(jpgPath);
-        if (await jpgFile.exists() && await jpgFile.length() > 0) {
-          return jpgPath;
+        final outPath = "${cacheDir.path}/$fileName";
+        final outFile = File(outPath);
+        if (await outFile.exists() && await outFile.length() > 0) {
+          return outPath;
         }
 
-        // Primary attempt: raw MJPEG single-frame muxer (-f mjpeg avoids FFmpeg 8
-        // image2 sequence-pattern errors; -color_range pc + yuv420p avoids deprecated yuvj420p).
-        final jpgArgs = <String>[
+        final args = <String>[
           '-y',
           if (seekSeconds > 0) ...['-ss', seekSeconds.toStringAsFixed(3)],
           '-i',
@@ -210,87 +210,31 @@ class VideoService {
           'scale=$scaleWidth:-2',
           '-pix_fmt',
           'yuv420p',
-          '-color_range',
-          'pc',
           '-strict',
           'unofficial',
           '-q:v',
           '3',
           '-f',
           'mjpeg',
-          jpgPath,
+          outPath,
         ];
 
-        final session = await FFmpegKit.executeWithArguments(jpgArgs);
-        if (await jpgFile.exists() && await jpgFile.length() > 0) {
-          return jpgPath;
+        final errorText = await _runFfmpegOneShot(args);
+        if (await outFile.exists() && await outFile.length() > 0) {
+          return outPath;
         }
 
-        final jpgErr = await session.getOutput() ?? "Unknown FFmpeg error";
-        debugPrint(
-          "[VideoService] JPEG extraction failed for '$videoPath': $jpgErr",
-        );
-
-        // Fallback 1: PNG via image2 with -update 1 (compatible with FFmpeg 8.x).
-        final pngPath = "${cacheDir.path}/${cacheKey}_fallback.png";
-        final pngFile = File(pngPath);
-        if (await pngFile.exists() && await pngFile.length() > 0) {
-          return pngPath;
+        if (errorText != null && errorText.isNotEmpty) {
+          lastThumbnailError = errorText
+                  .trim()
+                  .split('\n')
+                  .where((l) => l.trim().isNotEmpty)
+                  .lastOrNull ??
+              "Thumbnail extraction failed";
+          debugPrint(
+            "[VideoService] Frame extraction failed for '$videoPath': $errorText",
+          );
         }
-
-        final pngArgs = <String>[
-          '-y',
-          if (!allowFirstFrameFallback && seekSeconds > 0) ...[
-            '-ss',
-            seekSeconds.toStringAsFixed(3),
-          ],
-          '-i',
-          videoPath,
-          '-an',
-          '-sn',
-          '-dn',
-          '-frames:v',
-          '1',
-          '-vf',
-          'scale=$scaleWidth:-2',
-          '-c:v',
-          'png',
-          '-pix_fmt',
-          'rgb24',
-          '-f',
-          'image2',
-          '-update',
-          '1',
-          pngPath,
-        ];
-        final fallbackSession = await FFmpegKit.executeWithArguments(pngArgs);
-        if (await pngFile.exists() && await pngFile.length() > 0) {
-          return pngPath;
-        }
-
-        // Fallback 2: System ffmpeg CLI on Linux if bundled FFmpegKit failed.
-        if (Platform.isLinux) {
-          try {
-            final proc = await Process.run('ffmpeg', pngArgs);
-            if (proc.exitCode == 0 &&
-                await pngFile.exists() &&
-                await pngFile.length() > 0) {
-              return pngPath;
-            }
-          } catch (_) {}
-        }
-
-        final pngErr =
-            await fallbackSession.getOutput() ?? jpgErr;
-        lastThumbnailError = pngErr
-            .trim()
-            .split('\n')
-            .where((l) => l.trim().isNotEmpty)
-            .lastOrNull ??
-            "Thumbnail extraction failed";
-        debugPrint(
-          "[VideoService] PNG fallback failed for '$videoPath': $pngErr",
-        );
       } catch (e) {
         lastThumbnailError = e.toString();
         debugPrint("[VideoService] Frame extraction error: $e");
@@ -299,132 +243,198 @@ class VideoService {
     });
   }
 
-  /// Probes detailed video and audio metadata using file stats and FFprobeKit.
+  /// Probes detailed video and audio metadata.
   static Future<VideoMetadata> getVideoMetadata(String videoPath) async {
     return _enqueue(() async {
+      String sizeStr = "Unknown";
       try {
-        String sizeStr = "Unknown";
-        try {
-          final file = File(videoPath);
-          if (file.existsSync()) {
-            sizeStr = formatByteSize(file.lengthSync());
-          }
-        } catch (_) {}
-
-        final session = await FFprobeKit.getMediaInformation(videoPath);
-        final info = session.getMediaInformation();
-        if (info == null) return VideoMetadata(size: sizeStr);
-
-        String bitrate = "Unknown";
-        if (info.getBitrate() != null) {
-          final parsedBitrate = double.tryParse(info.getBitrate()!);
-          if (parsedBitrate != null) {
-            bitrate = "${(parsedBitrate / 1000).toStringAsFixed(0)} kbps";
-          }
+        final file = File(videoPath);
+        if (file.existsSync()) {
+          sizeStr = formatByteSize(file.lengthSync());
         }
+      } catch (_) {}
 
-        final durationSec = double.tryParse(info.getDuration() ?? '') ?? 0.0;
-        final durationStr = formatDuration(durationSec);
-
-        String resolution = "Unknown";
-        String timebase = "Unknown";
-        double? fpsValue;
-        String fpsStr = "Unknown";
-        String pixelFormat = "Unknown";
-        String videoProfile = "Unknown";
-        String vCodec = "Unknown";
-
-        String aCodec = "No Audio";
-        String aSampleRate = "N/A";
-        String aChannelLayout = "N/A";
-
-        bool hasVideo = false;
-        bool hasAudio = false;
-
-        for (final stream in info.getStreams()) {
-          final props = stream.getAllProperties();
-
-          if (stream.getType() == "video" && !hasVideo) {
-            hasVideo = true;
-            resolution = "${stream.getWidth()}x${stream.getHeight()}";
-
-            if (stream.getCodec() != null) {
-              vCodec = stream.getCodec()!.toUpperCase();
-            }
-
-            final tb = stream.getTimeBase() ?? props?['time_base']?.toString();
-            if (tb != null && tb.isNotEmpty) timebase = tb;
-
-            final pixFmt =
-                stream.getFormat() ?? props?['pix_fmt']?.toString();
-            if (pixFmt != null && pixFmt.isNotEmpty) pixelFormat = pixFmt;
-
-            final profile = props?['profile']?.toString();
-            if (profile != null && profile.isNotEmpty) {
-              videoProfile = _normalizeProfileName(vCodec, profile);
-            }
-
-            final rawFps =
-                stream.getRealFrameRate() ?? stream.getAverageFrameRate();
-            if (rawFps != null && rawFps.contains('/')) {
-              final parts = rawFps.split('/');
-              final num = double.tryParse(parts[0]);
-              final den = double.tryParse(parts[1]);
-              if (num != null && den != null && den != 0) {
-                fpsValue = num / den;
-                fpsStr = formatFps(fpsValue);
-              }
-            }
-          } else if (stream.getType() == "audio" && !hasAudio) {
-            hasAudio = true;
-            if (stream.getCodec() != null) {
-              aCodec = stream.getCodec()!.toUpperCase();
-            }
-
-            final sr =
-                stream.getSampleRate() ?? props?['sample_rate']?.toString();
-            if (sr != null && sr.isNotEmpty) aSampleRate = "$sr Hz";
-
-            final layout = stream.getChannelLayout() ??
-                props?['channel_layout']?.toString();
-            if (layout != null && layout.isNotEmpty) {
-              aChannelLayout = layout;
-            } else if (props?['channels'] != null) {
-              aChannelLayout = "${props!['channels']}ch";
-            }
-          }
+      try {
+        if (Platform.isLinux) {
+          return await _probeMetadataViaCli(videoPath, sizeStr);
         }
-
-        final totalFrames = (durationSec > 0 && fpsValue != null && fpsValue > 0)
-            ? (durationSec * fpsValue).round()
-            : 0;
-
-        return VideoMetadata(
-          videoCodec: vCodec,
-          resolution: resolution,
-          timebase: timebase,
-          fps: fpsStr,
-          fpsValue: fpsValue,
-          pixelFormat: pixelFormat,
-          videoProfile: videoProfile,
-          audioCodec: aCodec,
-          audioSampleRate: aSampleRate,
-          audioChannelLayout: aChannelLayout,
-          bitrate: bitrate,
-          totalFrames: totalFrames,
-          duration: durationStr,
-          durationSeconds: durationSec,
-          size: sizeStr,
-        );
+        return await _probeMetadataViaKit(videoPath, sizeStr);
       } catch (e) {
         debugPrint("[VideoService] Metadata probe error: $e");
-        return VideoMetadata();
+        return VideoMetadata(size: sizeStr);
       }
     });
   }
 
+  static Future<VideoMetadata> _probeMetadataViaCli(
+    String videoPath,
+    String sizeStr,
+  ) async {
+    final res = await Process.run('ffprobe', [
+      '-v',
+      'quiet',
+      '-print_format',
+      'json',
+      '-show_format',
+      '-show_streams',
+      videoPath,
+    ]);
+    if (res.exitCode != 0) return VideoMetadata(size: sizeStr);
+
+    final decoded = jsonDecode(res.stdout.toString());
+    if (decoded is! Map<String, dynamic>) return VideoMetadata(size: sizeStr);
+
+    final format = decoded['format'] as Map<String, dynamic>? ?? const {};
+    final streams = (decoded['streams'] as List<dynamic>? ?? const [])
+        .whereType<Map<String, dynamic>>()
+        .toList();
+
+    return _buildMetadataFromMaps(
+      formatProps: format,
+      streamPropsList: streams,
+      sizeStr: sizeStr,
+    );
+  }
+
+  static Future<VideoMetadata> _probeMetadataViaKit(
+    String videoPath,
+    String sizeStr,
+  ) async {
+    final session = await FFprobeKit.getMediaInformation(videoPath);
+    final info = session.getMediaInformation();
+    if (info == null) return VideoMetadata(size: sizeStr);
+
+    final formatProps = <String, dynamic>{
+      'duration': info.getDuration(),
+      'bit_rate': info.getBitrate(),
+    };
+    final streamPropsList = <Map<String, dynamic>>[];
+    for (final stream in info.getStreams()) {
+      final props = Map<String, dynamic>.from(
+        stream.getAllProperties() ?? const {},
+      );
+      props['codec_type'] ??= stream.getType();
+      props['codec_name'] ??= stream.getCodec();
+      props['width'] ??= stream.getWidth();
+      props['height'] ??= stream.getHeight();
+      props['time_base'] ??= stream.getTimeBase();
+      props['pix_fmt'] ??= stream.getFormat();
+      props['r_frame_rate'] ??= stream.getRealFrameRate();
+      props['avg_frame_rate'] ??= stream.getAverageFrameRate();
+      props['sample_rate'] ??= stream.getSampleRate();
+      props['channel_layout'] ??= stream.getChannelLayout();
+      streamPropsList.add(props);
+    }
+
+    return _buildMetadataFromMaps(
+      formatProps: formatProps,
+      streamPropsList: streamPropsList,
+      sizeStr: sizeStr,
+    );
+  }
+
+  /// Unified FFprobe JSON/property parser shared by both Linux CLI and macOS FFprobeKit.
+  static VideoMetadata _buildMetadataFromMaps({
+    required Map<String, dynamic> formatProps,
+    required List<Map<String, dynamic>> streamPropsList,
+    required String sizeStr,
+  }) {
+    String bitrate = "Unknown";
+    final parsedBitrate =
+        double.tryParse(formatProps['bit_rate']?.toString() ?? '');
+    if (parsedBitrate != null && parsedBitrate > 0) {
+      bitrate = "${(parsedBitrate / 1000).toStringAsFixed(0)} kbps";
+    }
+
+    final durationSec =
+        double.tryParse(formatProps['duration']?.toString() ?? '') ?? 0.0;
+    final durationStr = formatDuration(durationSec);
+
+    String resolution = "Unknown";
+    String timebase = "Unknown";
+    double? fpsValue;
+    String fpsStr = "Unknown";
+    String pixelFormat = "Unknown";
+    String videoProfile = "Unknown";
+    String vCodec = "Unknown";
+
+    String aCodec = "No Audio";
+    String aSampleRate = "N/A";
+    String aChannelLayout = "N/A";
+
+    bool hasVideo = false;
+    bool hasAudio = false;
+
+    for (final s in streamPropsList) {
+      final type = s['codec_type']?.toString();
+      if (type == 'video' && !hasVideo) {
+        hasVideo = true;
+        final w = s['width'];
+        final h = s['height'];
+        if (w != null && h != null) resolution = "${w}x$h";
+
+        final codec = s['codec_name']?.toString();
+        if (codec != null && codec.isNotEmpty) vCodec = codec.toUpperCase();
+
+        final tb = s['time_base']?.toString();
+        if (tb != null && tb.isNotEmpty) timebase = tb;
+
+        final pixFmt = s['pix_fmt']?.toString();
+        if (pixFmt != null && pixFmt.isNotEmpty) pixelFormat = pixFmt;
+
+        final profile = s['profile']?.toString();
+        if (profile != null && profile.isNotEmpty) {
+          videoProfile = _normalizeProfileName(vCodec, profile);
+        }
+
+        final rawFps = (s['r_frame_rate'] ?? s['avg_frame_rate'])?.toString();
+        final parsedFps = _parseFrameRate(rawFps);
+        if (parsedFps != null) {
+          fpsValue = parsedFps;
+          fpsStr = formatFps(parsedFps);
+        }
+      } else if (type == 'audio' && !hasAudio) {
+        hasAudio = true;
+        final codec = s['codec_name']?.toString();
+        if (codec != null && codec.isNotEmpty) aCodec = codec.toUpperCase();
+
+        final sr = s['sample_rate']?.toString();
+        if (sr != null && sr.isNotEmpty) aSampleRate = "$sr Hz";
+
+        final layout = s['channel_layout']?.toString();
+        if (layout != null && layout.isNotEmpty) {
+          aChannelLayout = layout;
+        } else if (s['channels'] != null) {
+          aChannelLayout = "${s['channels']}ch";
+        }
+      }
+    }
+
+    final totalFrames = (durationSec > 0 && fpsValue != null && fpsValue > 0)
+        ? (durationSec * fpsValue).round()
+        : 0;
+
+    return VideoMetadata(
+      videoCodec: vCodec,
+      resolution: resolution,
+      timebase: timebase,
+      fps: fpsStr,
+      fpsValue: fpsValue,
+      pixelFormat: pixelFormat,
+      videoProfile: videoProfile,
+      audioCodec: aCodec,
+      audioSampleRate: aSampleRate,
+      audioChannelLayout: aChannelLayout,
+      bitrate: bitrate,
+      totalFrames: totalFrames,
+      duration: durationStr,
+      durationSeconds: durationSec,
+      size: sizeStr,
+    );
+  }
+
   /// Extracts keyframe (I-frame) timestamps within a local window around [centerSeconds]
-  /// using FFprobe -read_intervals to avoid full-file packet scans and native log overflow.
+  /// using FFprobe -read_intervals to avoid full-file packet scans.
   static Future<List<double>> getKeyframesNear(
     String videoPath, {
     required double centerSeconds,
@@ -453,12 +463,7 @@ class VideoService {
           videoPath,
         ];
 
-        final session = await FFprobeKit.executeWithArguments(args);
-        if (!ReturnCode.isSuccess(await session.getReturnCode())) {
-          return const <double>[];
-        }
-
-        final output = await session.getOutput();
+        final output = await _runFfprobeOutput(args);
         if (output == null || output.isEmpty) return const <double>[];
 
         final keyframes = <double>[];
@@ -593,15 +598,65 @@ class VideoService {
     return success ? outputPath : null;
   }
 
-  /// Shared FFmpeg execution helper that wires up statistics & log callbacks cleanly.
+  /// Runs a one-shot FFmpeg command and returns error output if it failed.
+  static Future<String?> _runFfmpegOneShot(List<String> args) async {
+    if (Platform.isLinux) {
+      final res = await Process.run('ffmpeg', args);
+      return res.exitCode == 0 ? null : res.stderr.toString();
+    }
+    final session = await FFmpegKit.executeWithArguments(args);
+    if (ReturnCode.isSuccess(await session.getReturnCode())) return null;
+    return await session.getOutput();
+  }
+
+  /// Runs FFprobe and returns stdout on success.
+  static Future<String?> _runFfprobeOutput(List<String> args) async {
+    if (Platform.isLinux) {
+      final res = await Process.run('ffprobe', args);
+      return res.exitCode == 0 ? res.stdout.toString() : null;
+    }
+    final session = await FFprobeKit.executeWithArguments(args);
+    if (!ReturnCode.isSuccess(await session.getReturnCode())) return null;
+    return await session.getOutput();
+  }
+
+  /// Executes FFmpeg with live progress & log streaming (Linux CLI or macOS FFmpegKit).
   static Future<bool> _executeWithProgress({
     required List<String> args,
     required int totalFrames,
     required Function(int) onProgressFrames,
     required Function(String) onLogReceived,
   }) async {
+    if (Platform.isLinux) {
+      final process = await Process.start('ffmpeg', args);
+      _activeCliProcess = process;
+      final frameRegex = RegExp(r'frame=\s*(\d+)');
+
+      final sub = process.stderr
+          .transform(utf8.decoder)
+          .transform(const LineSplitter())
+          .listen((line) {
+        onLogReceived(line);
+        final match = frameRegex.firstMatch(line);
+        if (match != null) {
+          final frame = int.tryParse(match.group(1) ?? '');
+          if (frame != null && frame > 0) onProgressFrames(frame);
+        }
+      });
+
+      final exitCode = await process.exitCode;
+      await sub.cancel();
+      _activeCliProcess = null;
+
+      if (exitCode == 0) {
+        onProgressFrames(totalFrames);
+        return true;
+      }
+      return false;
+    }
+
     FFmpegKitConfig.enableStatisticsCallback((statistics) {
-      final frame = _readFrameNumber(statistics);
+      final frame = statistics.getVideoFrameNumber();
       if (frame > 0) onProgressFrames(frame);
     });
 
@@ -622,27 +677,27 @@ class VideoService {
     return false;
   }
 
-  static int _readFrameNumber(dynamic statistics) {
-    try {
-      return statistics.videoFrameNumber as int;
-    } catch (_) {}
-    try {
-      return statistics.frameNumber as int;
-    } catch (_) {}
-    try {
-      return statistics.getVideoFrameNumber() as int;
-    } catch (_) {}
-    return 0;
-  }
-
-  /// Cancels any active FFmpegKit execution session.
+  /// Cancels any active FFmpeg process.
   static void cancelCurrentOperation() {
+    if (Platform.isLinux) {
+      _activeCliProcess?.kill();
+      _activeCliProcess = null;
+      return;
+    }
     try {
       FFmpegKit.cancel();
-      debugPrint("[VideoService] FFmpegKit cancel signal sent.");
     } catch (e) {
       debugPrint("[VideoService] Failed to cancel FFmpeg process: $e");
     }
+  }
+
+  static double? _parseFrameRate(String? rawFps) {
+    if (rawFps == null || !rawFps.contains('/')) return null;
+    final parts = rawFps.split('/');
+    final num = double.tryParse(parts[0]);
+    final den = double.tryParse(parts[1]);
+    if (num == null || den == null || den == 0) return null;
+    return num / den;
   }
 
   static String _normalizeProfileName(String codec, String rawProfile) {

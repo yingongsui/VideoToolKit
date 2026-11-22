@@ -27,6 +27,9 @@ migrate_working_dir/
 /build/
 /coverage/
 
+# Local-only Web UI preview platform files
+/web/
+
 # Symbolication & Obfuscation
 app.*.symbols
 app.*.map.json
