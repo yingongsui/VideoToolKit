@@ -1,0 +1,120 @@
+name: Build Linux Desktop App (.deb)
+
+on:
+  # Trigger manually from GitHub Actions tab or when pushing a version tag (e.g. v1.2.0).
+  workflow_dispatch:
+  push:
+    tags:
+      - 'v*'
+
+concurrency:
+  group: linux-build-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build_linux:
+    name: Build Ubuntu amd64 Package (.deb)
+    runs-on: ubuntu-24.04
+
+    permissions:
+      contents: write
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Install Linux GTK3 and FFmpegKit build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            clang \
+            cmake \
+            ninja-build \
+            pkg-config \
+            libgtk-3-dev \
+            liblzma-dev \
+            libjson-glib-dev
+
+      - name: Setup Flutter (3.44.2)
+        uses: subosito/flutter-action@v2
+        with:
+          flutter-version: '3.44.2'
+          channel: stable
+          cache: true
+
+      - name: Enable Linux desktop support
+        run: flutter config --enable-linux-desktop
+
+      - name: Install Dart & Flutter dependencies
+        run: flutter pub get
+
+      - name: Build Linux x64 release bundle
+        run: flutter build linux --release
+
+      - name: Package Ubuntu .deb installer
+        run: |
+          APP_VERSION=$(grep '^version:' pubspec.yaml | awk '{print $2}' | cut -d'+' -f1)
+          PKG_DIR="dist/deb_pkg"
+
+          mkdir -p "${PKG_DIR}/DEBIAN"
+          mkdir -p "${PKG_DIR}/opt/videotoolkit"
+          mkdir -p "${PKG_DIR}/usr/bin"
+          mkdir -p "${PKG_DIR}/usr/share/applications"
+          mkdir -p "${PKG_DIR}/usr/share/icons/hicolor/512x512/apps"
+
+          # Copy Flutter Linux release bundle
+          cp -R build/linux/x64/release/bundle/* "${PKG_DIR}/opt/videotoolkit/"
+          chmod 0755 "${PKG_DIR}/opt/videotoolkit/VideoToolKit"
+
+          # Create CLI symlink
+          ln -s /opt/videotoolkit/VideoToolKit "${PKG_DIR}/usr/bin/videotoolkit"
+
+          # Install application icon
+          if [ -f "assets/icon/icon.png" ]; then
+            cp assets/icon/icon.png "${PKG_DIR}/usr/share/icons/hicolor/512x512/apps/videotoolkit.png"
+          fi
+
+          # Create freedesktop .desktop launcher
+          cat << 'EOF' > "${PKG_DIR}/usr/share/applications/videotoolkit.desktop"
+          [Desktop Entry]
+          Name=VideoToolKit
+          Comment=Desktop video media library, lossless merger, and trimmer
+          Exec=/opt/videotoolkit/VideoToolKit
+          Icon=videotoolkit
+          Terminal=false
+          Type=Application
+          Categories=AudioVideo;Video;
+          StartupWMClass=com.example.videotoolkit
+          EOF
+
+          # Create Debian package control metadata
+          cat << EOF > "${PKG_DIR}/DEBIAN/control"
+          Package: videotoolkit
+          Version: ${APP_VERSION}
+          Section: video
+          Priority: optional
+          Architecture: amd64
+          Depends: libgtk-3-0 | libgtk-3-0t64, libjson-glib-1.0-0, zenity | kdialog
+          Maintainer: VideoToolKit <noreply@example.com>
+          Description: VideoToolKit desktop video utility
+           Desktop video media library with lossless stream merging (-c copy)
+           and coarse/fine video trimming powered by FFmpeg.
+          EOF
+
+          chmod 0755 "${PKG_DIR}/DEBIAN"
+          chmod 0644 "${PKG_DIR}/DEBIAN/control"
+
+          dpkg-deb --build --root-owner-group "${PKG_DIR}" "dist/VideoToolKit-${APP_VERSION}-amd64.deb"
+
+      - name: Upload Ubuntu .deb artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: VideoToolKit-ubuntu-amd64-deb
+          path: dist/*.deb
+          retention-days: 14
+
+      - name: Create GitHub Release (on version tag)
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: dist/*.deb
