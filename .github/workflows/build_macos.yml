@@ -53,24 +53,24 @@ jobs:
       - name: Package .dmg
         run: |
           mkdir -p dist/dmg_stage
-          cp -R "build/macos/Build/Products/Release/video_merger.app" dist/dmg_stage/
+          cp -R "build/macos/Build/Products/Release/VideoToolKit.app" dist/dmg_stage/
           ln -s /Applications dist/dmg_stage/Applications
           hdiutil create \
-            -volname "Video Merger" \
+            -volname "VideoToolKit" \
             -srcfolder dist/dmg_stage \
             -ov \
             -format UDZO \
-            dist/video_merger-macos.dmg
+            dist/VideoToolKit-macos.dmg
 
       - name: Upload macOS DMG artifact
         uses: actions/upload-artifact@v4
         with:
-          name: video_merger-macos-dmg
-          path: dist/video_merger-macos.dmg
+          name: VideoToolKit-macos-dmg
+          path: dist/VideoToolKit-macos.dmg
           retention-days: 14
 
       - name: Create GitHub Release (on version tag)
         if: startsWith(github.ref, 'refs/tags/v')
         uses: softprops/action-gh-release@v2
         with:
-          files: dist/video_merger-macos.dmg
+          files: dist/VideoToolKit-macos.dmg

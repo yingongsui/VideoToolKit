@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'package:flutter/material.dart';
 import 'app_settings.dart';
+import 'console_log_panel.dart';
 import 'settings_dialog.dart';
 import 'video_service.dart';
 
@@ -45,35 +46,40 @@ class _MergePageState extends State<MergePage> {
 
     // Ensure thumbnails and metadata are loaded for any passed items.
     for (final item in videoItems) {
-      if (item.metadata == null) {
-        VideoService.getVideoMetadata(item.path).then((meta) {
-          if (!mounted) return;
-          setState(() => item.metadata = meta);
-          if (item.thumbPath == null) {
-            VideoService.generateThumbnail(
-              item.path,
-              fpsValue: meta.fpsValue,
-              totalFrames: meta.totalFrames,
-              durationSeconds: meta.durationSeconds,
-            ).then((thumb) {
-              if (mounted && thumb != null) {
-                setState(() => item.thumbPath = thumb);
-              }
-            });
-          }
-        });
-      } else if (item.thumbPath == null) {
-        VideoService.generateThumbnail(
-          item.path,
-          fpsValue: item.metadata?.fpsValue,
-          totalFrames: item.metadata?.totalFrames,
-          durationSeconds: item.metadata?.durationSeconds,
-        ).then((thumb) {
-          if (mounted && thumb != null) {
-            setState(() => item.thumbPath = thumb);
-          }
-        });
-      }
+      _loadItemDetails(item);
+    }
+  }
+
+  /// Loads missing metadata and 10%-frame thumbnail for a single VideoItem.
+  void _loadItemDetails(VideoItem item) {
+    if (item.metadata == null) {
+      VideoService.getVideoMetadata(item.path).then((meta) {
+        if (!mounted) return;
+        setState(() => item.metadata = meta);
+        if (item.thumbPath == null) {
+          VideoService.generateThumbnail(
+            item.path,
+            fpsValue: meta.fpsValue,
+            totalFrames: meta.totalFrames,
+            durationSeconds: meta.durationSeconds,
+          ).then((thumb) {
+            if (mounted && thumb != null) {
+              setState(() => item.thumbPath = thumb);
+            }
+          });
+        }
+      });
+    } else if (item.thumbPath == null) {
+      VideoService.generateThumbnail(
+        item.path,
+        fpsValue: item.metadata?.fpsValue,
+        totalFrames: item.metadata?.totalFrames,
+        durationSeconds: item.metadata?.durationSeconds,
+      ).then((thumb) {
+        if (mounted && thumb != null) {
+          setState(() => item.thumbPath = thumb);
+        }
+      });
     }
   }
 
@@ -106,22 +112,8 @@ class _MergePageState extends State<MergePage> {
       if (videoItems.any((item) => item.path == path)) continue;
 
       final newItem = VideoItem(path);
-      setState(() {
-        videoItems.add(newItem);
-      });
-
-      VideoService.getVideoMetadata(path).then((meta) {
-        if (!mounted) return;
-        setState(() => newItem.metadata = meta);
-        VideoService.generateThumbnail(
-          path,
-          fpsValue: meta.fpsValue,
-          totalFrames: meta.totalFrames,
-          durationSeconds: meta.durationSeconds,
-        ).then((thumb) {
-          if (mounted) setState(() => newItem.thumbPath = thumb);
-        });
-      });
+      setState(() => videoItems.add(newItem));
+      _loadItemDetails(newItem);
     }
   }
 
@@ -602,73 +594,13 @@ class _MergePageState extends State<MergePage> {
 
           // Runtime console log panel
           if (videoItems.isNotEmpty)
-            Container(
-              height: 120,
+            ConsoleLogPanel(
+              title: "CONSOLE RUNTIME LOGS",
+              commandPreview: _currentCommand,
+              idleMessage: "System Idle. Ready for terminal tracking...",
+              logs: _consoleLogs,
+              scrollController: _consoleScrollController,
               margin: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
-              padding: const EdgeInsets.all(10),
-              decoration: BoxDecoration(
-                color: isDarkMode ? Colors.black : Colors.grey[900],
-                borderRadius: BorderRadius.circular(8),
-                border: Border.all(
-                  color: isDarkMode ? Colors.grey[800]! : Colors.grey[400]!,
-                ),
-              ),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  const Text(
-                    "CONSOLE RUNTIME LOGS",
-                    style: TextStyle(
-                      color: Colors.grey,
-                      fontSize: 10,
-                      fontWeight: FontWeight.bold,
-                      fontFamily: 'monospace',
-                    ),
-                  ),
-                  Divider(color: Colors.grey[800], height: 8),
-                  if (_currentCommand.isNotEmpty)
-                    Padding(
-                      padding: const EdgeInsets.only(bottom: 4),
-                      child: Text(
-                        "\$ $_currentCommand",
-                        maxLines: 2,
-                        overflow: TextOverflow.ellipsis,
-                        style: const TextStyle(
-                          color: Colors.cyanAccent,
-                          fontSize: 11,
-                          fontFamily: 'monospace',
-                        ),
-                      ),
-                    ),
-                  Expanded(
-                    child: _consoleLogs.isEmpty
-                        ? Center(
-                            child: Text(
-                              "System Idle. Ready for terminal tracking...",
-                              style: TextStyle(
-                                color: Colors.grey[600],
-                                fontSize: 12,
-                                fontFamily: 'monospace',
-                              ),
-                            ),
-                          )
-                        : ListView.builder(
-                            controller: _consoleScrollController,
-                            itemCount: _consoleLogs.length,
-                            itemBuilder: (context, idx) {
-                              return Text(
-                                _consoleLogs[idx],
-                                style: const TextStyle(
-                                  color: Colors.white70,
-                                  fontSize: 11,
-                                  fontFamily: 'monospace',
-                                ),
-                              );
-                            },
-                          ),
-                  ),
-                ],
-              ),
             ),
 
           if (isMerging)
@@ -775,12 +707,7 @@ class _MergePageState extends State<MergePage> {
     final String finalOutputDirPath =
         _customTargetFolder ?? getParentDirectoryPath(videoItems[0].path);
 
-    String firstFileName = videoItems[0].path.split('/').last;
-    if (firstFileName.contains('.')) {
-      final parts = firstFileName.split('.');
-      parts.removeLast();
-      firstFileName = parts.join('.');
-    }
+    final String firstFileName = stripFileExtension(videoItems[0].name);
 
     final String computedOutPath =
         "$finalOutputDirPath/${firstFileName}_merged.mp4";

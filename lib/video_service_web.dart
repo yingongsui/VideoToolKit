@@ -15,20 +15,17 @@ Widget buildLocalImage(
   BoxFit fit = BoxFit.cover,
 }) {
   final seed = path.hashCode.abs();
-  final palettes = [
-    [const Color(0xFF1E3C72), const Color(0xFF2A5298)],
-    [const Color(0xFF134E5E), const Color(0xFF71B280)],
-    [const Color(0xFF3A1C71), const Color(0xFFD76D77)],
-    [const Color(0xFF0F2027), const Color(0xFF2C5364)],
-    [const Color(0xFF42275A), const Color(0xFF734B6D)],
+  const palettes = [
+    [Color(0xFF1E3C72), Color(0xFF2A5298)],
+    [Color(0xFF134E5E), Color(0xFF71B280)],
+    [Color(0xFF3A1C71), Color(0xFFD76D77)],
+    [Color(0xFF0F2027), Color(0xFF2C5364)],
+    [Color(0xFF42275A), Color(0xFF734B6D)],
   ];
   final colors = palettes[seed % palettes.length];
 
-  String? frameBadge;
   final frameMatch = RegExp(r'#f(\d+)').firstMatch(path);
-  if (frameMatch != null) {
-    frameBadge = "Frame #${frameMatch.group(1)}";
-  }
+  final frameBadge = frameMatch != null ? "Frame #${frameMatch.group(1)}" : null;
 
   return Container(
     width: width,
@@ -44,11 +41,7 @@ Widget buildLocalImage(
       child: Column(
         mainAxisSize: MainAxisSize.min,
         children: [
-          const Icon(
-            Icons.play_circle_outline,
-            color: Colors.white70,
-            size: 30,
-          ),
+          const Icon(Icons.play_circle_outline, color: Colors.white70, size: 30),
           if (frameBadge != null && (width == null || width >= 90)) ...[
             const SizedBox(height: 4),
             Text(
@@ -74,8 +67,6 @@ class VideoService {
   /// Diagnostic error field (always null in Web mock preview mode).
   static String? lastThumbnailError;
 
-  // Mock library folders and files (includes extra extensions like .rmvb/.m2ts
-  // so custom extension filtering can be tested directly in Web preview).
   static const Map<String, List<String>> _mockLibrary = {
     '/Users/demo/Movies/Travel_4K': [
       '/Users/demo/Movies/Travel_4K/tokyo_night_01.mp4',
@@ -99,14 +90,12 @@ class VideoService {
   static int _mockFolderCursor = 0;
   static bool _cancelRequested = false;
 
-  /// Seeds one mock folder automatically so Web UI preview is immediately populated.
   static List<String> get defaultPreviewFolders => const [
         '/Users/demo/Movies/Travel_4K',
       ];
 
   static Future<bool> directoryExists(String folderPath) async => true;
 
-  /// Simulates adding a folder in Web preview mode by cycling through mock folders.
   static Future<String?> pickDirectory({String? dialogTitle}) async {
     final keys = _mockLibrary.keys.toList();
     final selected = keys[_mockFolderCursor % keys.length];
@@ -114,7 +103,6 @@ class VideoService {
     return selected;
   }
 
-  /// Simulates picking extra video files in Web preview mode.
   static Future<List<String>> pickVideoFiles({
     String? dialogTitle,
     List<String>? allowedExtensions,
@@ -125,7 +113,6 @@ class VideoService {
     ];
   }
 
-  /// Returns mock video file paths filtered by the active extension list.
   static Future<List<String>> scanVideosInFolder(
     String folderPath, {
     List<String>? allowedExtensions,
@@ -142,7 +129,6 @@ class VideoService {
     }).toList();
   }
 
-  /// Returns a virtual thumbnail identifier sampled at 10% of total frames.
   static Future<String?> generateThumbnail(
     String videoPath, {
     double? fpsValue,
@@ -150,37 +136,33 @@ class VideoService {
     double? durationSeconds,
   }) async {
     await Future.delayed(const Duration(milliseconds: 100));
-    final sampledFrame =
-        (totalFrames != null && totalFrames > 0) ? (totalFrames * 0.10).round() : 0;
+    final sampledFrame = (totalFrames != null && totalFrames > 0)
+        ? (totalFrames * 0.10).round()
+        : 0;
     return "mock_thumb:$videoPath#f$sampledFrame";
   }
 
-  /// Returns deterministic mock extended metadata for UI preview cards.
   static Future<VideoMetadata> getVideoMetadata(String videoPath) async {
     await Future.delayed(const Duration(milliseconds: 150));
     final h = videoPath.hashCode.abs();
-    final durationSecsList = [45.0, 92.0, 138.0, 185.0, 312.0];
-    final durations = ["00:45", "01:32", "02:18", "03:05", "05:12"];
-    final resolutions = ["3840x2160", "1920x1080"];
-    final fpsValues = [59.94, 60.0, 30.0];
-    final timebases = ["1/90000", "1/15360"];
-    final pixFmts = ["yuv420p", "yuv420p10le"];
-    final profiles = ["High", "Main", "Main 10"];
-    final sampleRates = ["48000 Hz", "44100 Hz"];
-    final layouts = ["stereo", "5.1"];
-    final sizes = ["84.2 MB", "142.5 MB", "268.0 MB", "512.4 MB"];
+    const durationSecsList = [45.0, 92.0, 138.0, 185.0, 312.0];
+    const resolutions = ["3840x2160", "1920x1080"];
+    const fpsValues = [59.94, 60.0, 30.0];
+    const timebases = ["1/90000", "1/15360"];
+    const pixFmts = ["yuv420p", "yuv420p10le"];
+    const profiles = ["High", "Main", "Main 10"];
+    const sampleRates = ["48000 Hz", "44100 Hz"];
+    const layouts = ["stereo", "5.1"];
+    const sizes = ["84.2 MB", "142.5 MB", "268.0 MB", "512.4 MB"];
 
     final durationSec = durationSecsList[h % durationSecsList.length];
     final fpsVal = fpsValues[h % fpsValues.length];
-    final fpsStr = (fpsVal - fpsVal.roundToDouble()).abs() < 0.05
-        ? "${fpsVal.round()} FPS"
-        : "${fpsVal.toStringAsFixed(2)} FPS";
 
     return VideoMetadata(
       videoCodec: h % 3 == 0 ? "HEVC" : "H264",
       resolution: resolutions[h % resolutions.length],
       timebase: timebases[h % timebases.length],
-      fps: fpsStr,
+      fps: formatFps(fpsVal),
       fpsValue: fpsVal,
       pixelFormat: pixFmts[h % pixFmts.length],
       videoProfile: profiles[h % profiles.length],
@@ -189,50 +171,21 @@ class VideoService {
       audioChannelLayout: layouts[h % layouts.length],
       bitrate: "${12000 + (h % 8) * 1500} kbps",
       totalFrames: (durationSec * fpsVal).round(),
-      duration: durations[h % durations.length],
+      duration: formatDuration(durationSec),
       durationSeconds: durationSec,
       size: sizes[h % sizes.length],
     );
   }
 
-  /// Simulates FFmpeg concat progress and console logs in Web preview mode.
-  static Future<String?> mergeVideosDirectly({
-    required List<String> filePaths,
-    required int totalFrames,
-    required String outputPath,
-    required Function(int) onProgressFrames,
-    required Function(String) onLogReceived,
+  static Future<List<double>> getKeyframes(
+    String videoPath, {
+    double durationSeconds = 120.0,
   }) async {
-    if (filePaths.isEmpty) return null;
-    _cancelRequested = false;
-
-    final effectiveFrames = totalFrames > 0 ? totalFrames : 3000;
-    onLogReceived("[WEB PREVIEW] Simulating FFmpeg concat demuxer (-c copy)...");
-    for (final p in filePaths) {
-      onLogReceived("[WEB PREVIEW] Input stream: ${p.split('/').last}");
-    }
-
-    const steps = 20;
-    for (int step = 1; step <= steps; step++) {
-      await Future.delayed(const Duration(milliseconds: 150));
-      if (_cancelRequested) {
-        onLogReceived("[WEB PREVIEW] Simulation cancelled.");
-        return null;
-      }
-      final currentFrame = ((effectiveFrames * step) / steps).round();
-      onProgressFrames(currentFrame);
-      if (step % 4 == 0) {
-        onLogReceived(
-          "frame=$currentFrame fps=480.0 q=-1.0 size=${step * 14}MB bitrate=N/A speed=16.0x",
-        );
-      }
-    }
-
-    onLogReceived("[WEB PREVIEW] Mock merge complete -> $outputPath");
-    return outputPath;
+    await Future.delayed(const Duration(milliseconds: 120));
+    final dur = durationSeconds > 0 ? durationSeconds : 120.0;
+    return [for (double t = 0.0; t < dur; t += 4.0) t];
   }
 
-  /// Returns a virtual frame preview token for Web UI testing.
   static Future<String?> extractFrameAtTime(
     String videoPath,
     double timestampSeconds, {
@@ -245,7 +198,31 @@ class VideoService {
     return "mock_frame:$videoPath$suffix";
   }
 
-  /// Simulates video trimming progress and FFmpeg logs in Web preview mode.
+  static Future<String?> mergeVideosDirectly({
+    required List<String> filePaths,
+    required int totalFrames,
+    required String outputPath,
+    required Function(int) onProgressFrames,
+    required Function(String) onLogReceived,
+  }) async {
+    if (filePaths.isEmpty) return null;
+    onLogReceived("[WEB PREVIEW] Simulating FFmpeg concat demuxer (-c copy)...");
+    for (final p in filePaths) {
+      onLogReceived("[WEB PREVIEW] Input stream: ${p.split('/').last}");
+    }
+    final completed = await _simulateProgress(
+      totalFrames: totalFrames > 0 ? totalFrames : 3000,
+      steps: 20,
+      stepDelayMs: 140,
+      speedLabel: "16.0x",
+      onProgressFrames: onProgressFrames,
+      onLogReceived: onLogReceived,
+    );
+    if (!completed) return null;
+    onLogReceived("[WEB PREVIEW] Mock merge complete -> $outputPath");
+    return outputPath;
+  }
+
   static Future<String?> trimVideo({
     required String inputPath,
     required String outputPath,
@@ -257,38 +234,49 @@ class VideoService {
     required Function(String) onLogReceived,
   }) async {
     if (endSeconds <= startSeconds) return null;
-    _cancelRequested = false;
-
-    final modeLabel =
-        frameAccurate ? "Fine (Frame-Accurate Re-encode)" : "Coarse (Fast -c copy)";
-    final effectiveFrames = totalClipFrames > 0 ? totalClipFrames : 600;
-
-    onLogReceived("[WEB PREVIEW] Trim mode: $modeLabel");
+    onLogReceived(
+      "[WEB PREVIEW] Trim mode: ${frameAccurate ? 'Fine (Re-encode)' : 'Coarse (-c copy)'}",
+    );
     onLogReceived(
       "[WEB PREVIEW] Range: ${formatTimecode(startSeconds)} -> ${formatTimecode(endSeconds)}",
     );
-
-    const steps = 16;
-    for (int step = 1; step <= steps; step++) {
-      await Future.delayed(Duration(milliseconds: frameAccurate ? 140 : 80));
-      if (_cancelRequested) {
-        onLogReceived("[WEB PREVIEW] Trim simulation cancelled.");
-        return null;
-      }
-      final currentFrame = ((effectiveFrames * step) / steps).round();
-      onProgressFrames(currentFrame);
-      if (step % 4 == 0) {
-        onLogReceived(
-          "frame=$currentFrame fps=${frameAccurate ? '120.0' : '640.0'} time=${formatTimecode((endSeconds - startSeconds) * step / steps)} speed=${frameAccurate ? '4.0x' : '21.0x'}",
-        );
-      }
-    }
-
+    final completed = await _simulateProgress(
+      totalFrames: totalClipFrames > 0 ? totalClipFrames : 600,
+      steps: 16,
+      stepDelayMs: frameAccurate ? 140 : 80,
+      speedLabel: frameAccurate ? "4.0x" : "21.0x",
+      onProgressFrames: onProgressFrames,
+      onLogReceived: onLogReceived,
+    );
+    if (!completed) return null;
     onLogReceived("[WEB PREVIEW] Mock trim complete -> $outputPath");
     return outputPath;
   }
 
-  /// Cancels the simulated merge or trim loop in Web preview mode.
+  static Future<bool> _simulateProgress({
+    required int totalFrames,
+    required int steps,
+    required int stepDelayMs,
+    required String speedLabel,
+    required Function(int) onProgressFrames,
+    required Function(String) onLogReceived,
+  }) async {
+    _cancelRequested = false;
+    for (int step = 1; step <= steps; step++) {
+      await Future.delayed(Duration(milliseconds: stepDelayMs));
+      if (_cancelRequested) {
+        onLogReceived("[WEB PREVIEW] Operation cancelled.");
+        return false;
+      }
+      final currentFrame = ((totalFrames * step) / steps).round();
+      onProgressFrames(currentFrame);
+      if (step % 4 == 0) {
+        onLogReceived("frame=$currentFrame speed=$speedLabel");
+      }
+    }
+    return true;
+  }
+
   static void cancelCurrentOperation() {
     _cancelRequested = true;
   }

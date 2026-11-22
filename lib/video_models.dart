@@ -1,5 +1,5 @@
 // ============================================================================
-// Shared Video Data Models & Pure Dart Helpers
+// Shared Video Data Models & Pure Dart Formatting Helpers
 // ============================================================================
 
 /// Holds parsed video/audio stream and file diagnostics for a video asset.
@@ -51,15 +51,9 @@ class VideoMetadata {
   List<String> compareCompatibility(VideoMetadata reference) {
     final mismatches = <String>[];
 
-    if (videoCodec != reference.videoCodec) {
-      mismatches.add("Video Codec");
-    }
-    if (resolution != reference.resolution) {
-      mismatches.add("Resolution");
-    }
-    if (timebase != reference.timebase) {
-      mismatches.add("Timebase");
-    }
+    if (videoCodec != reference.videoCodec) mismatches.add("Video Codec");
+    if (resolution != reference.resolution) mismatches.add("Resolution");
+    if (timebase != reference.timebase) mismatches.add("Timebase");
     if (fpsValue != null && reference.fpsValue != null) {
       if ((fpsValue! - reference.fpsValue!).abs() > fpsTolerance) {
         mismatches.add("FPS (>0.5 diff)");
@@ -67,15 +61,9 @@ class VideoMetadata {
     } else if (fps != reference.fps) {
       mismatches.add("FPS");
     }
-    if (pixelFormat != reference.pixelFormat) {
-      mismatches.add("Pixel Format");
-    }
-    if (videoProfile != reference.videoProfile) {
-      mismatches.add("Profile");
-    }
-    if (audioCodec != reference.audioCodec) {
-      mismatches.add("Audio Codec");
-    }
+    if (pixelFormat != reference.pixelFormat) mismatches.add("Pixel Format");
+    if (videoProfile != reference.videoProfile) mismatches.add("Profile");
+    if (audioCodec != reference.audioCodec) mismatches.add("Audio Codec");
     if (audioSampleRate != reference.audioSampleRate) {
       mismatches.add("Sample Rate");
     }
@@ -109,12 +97,49 @@ class VideoItem {
   }
 }
 
-/// Pure string helper to extract the parent directory from a POSIX/Windows path.
+/// Extracts the parent directory from a POSIX or Windows file path.
 String getParentDirectoryPath(String filePath) {
   final normalized = filePath.replaceAll('\\', '/');
   final lastSlash = normalized.lastIndexOf('/');
   if (lastSlash <= 0) return "/";
   return normalized.substring(0, lastSlash);
+}
+
+/// Strips the last file extension from a file name (e.g. "clip.mp4" -> "clip").
+String stripFileExtension(String fileName) {
+  final idx = fileName.lastIndexOf('.');
+  return idx > 0 ? fileName.substring(0, idx) : fileName;
+}
+
+/// Formats a numeric FPS value cleanly (e.g. 60.0 -> "60 FPS", 59.94 -> "59.94 FPS").
+String formatFps(double fps) {
+  final rounded = fps.roundToDouble();
+  if ((fps - rounded).abs() < 0.05) {
+    return "${rounded.toInt()} FPS";
+  }
+  return "${fps.toStringAsFixed(2)} FPS";
+}
+
+/// Formats a byte count into MB or GB string.
+String formatByteSize(int bytes) {
+  if (bytes >= 1024 * 1024 * 1024) {
+    return "${(bytes / (1024 * 1024 * 1024)).toStringAsFixed(1)} GB";
+  }
+  return "${(bytes / (1024 * 1024)).toStringAsFixed(1)} MB";
+}
+
+/// Formats duration in seconds into HH:MM:SS or MM:SS.
+String formatDuration(double durationSec) {
+  if (durationSec <= 0) return "Unknown";
+  final totalSecs = durationSec.round();
+  final hours = totalSecs ~/ 3600;
+  final minutes = (totalSecs % 3600) ~/ 60;
+  final secs = totalSecs % 60;
+  final minPart = minutes.toString().padLeft(2, '0');
+  final secPart = secs.toString().padLeft(2, '0');
+  return hours > 0
+      ? "${hours.toString().padLeft(2, '0')}:$minPart:$secPart"
+      : "$minPart:$secPart";
 }
 
 /// Formats seconds into HH:MM:SS.mmm timecode string.

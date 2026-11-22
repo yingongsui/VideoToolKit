@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:math' as math;
 import 'package:flutter/material.dart';
+import 'console_log_panel.dart';
 import 'video_service.dart';
 
 // ============================================================================
@@ -29,6 +30,11 @@ class _TrimPageState extends State<TrimPage> {
 
   // Export mode: false = fast keyframe copy (-c copy), true = frame-accurate re-encode.
   bool _frameAccurateExport = false;
+
+  // Keyframe snapping state (enabled by default in Coarse mode for lossless -c copy).
+  bool _snapToKeyframe = true;
+  bool _isLoadingKeyframes = false;
+  List<double> _keyframes = [];
 
   // Which boundary is currently focused in Fine Frame zoom slider (true = IN, false = OUT).
   bool _fineEditingStart = true;
@@ -73,7 +79,7 @@ class _TrimPageState extends State<TrimPage> {
     _startFrameController = TextEditingController();
     _endFrameController = TextEditingController();
 
-    final baseName = _stripExtension(widget.videoItem.name);
+    final baseName = stripFileExtension(widget.videoItem.name);
     _outputNameController = TextEditingController(text: "${baseName}_trim.mp4");
 
     _startFrameThumb = widget.videoItem.thumbPath;
@@ -117,6 +123,76 @@ class _TrimPageState extends State<TrimPage> {
 
     _scheduleFramePreview(isStart: true);
     _scheduleFramePreview(isStart: false);
+    _loadKeyframes(parsedDuration);
+  }
+
+  Future<void> _loadKeyframes(double durationSec) async {
+    setState(() => _isLoadingKeyframes = true);
+    final kfs = await VideoService.getKeyframes(
+      widget.videoItem.path,
+      durationSeconds: durationSec,
+    );
+    if (!mounted) return;
+    setState(() {
+      _keyframes = kfs;
+      _isLoadingKeyframes = false;
+    });
+  }
+
+  /// Finds the nearest keyframe timestamp to [targetSeconds] using binary search.
+  double _snapSecondsToNearestKeyframe(double targetSeconds) {
+    if (_keyframes.isEmpty) return targetSeconds;
+    int low = 0;
+    int high = _keyframes.length - 1;
+    while (low < high) {
+      final mid = (low + high) >> 1;
+      if (_keyframes[mid] < targetSeconds) {
+        low = mid + 1;
+      } else {
+        high = mid;
+      }
+    }
+    double best = _keyframes[low];
+    if (low > 0) {
+      final prev = _keyframes[low - 1];
+      if ((targetSeconds - prev).abs() <= (best - targetSeconds).abs()) {
+        best = prev;
+      }
+    }
+    return best;
+  }
+
+  /// Steps to the previous or next keyframe relative to the current IN/OUT timestamp.
+  void _stepKeyframe({required bool isStart, required bool next}) {
+    if (_keyframes.isEmpty) {
+      _showSnackBar("No keyframes loaded yet.");
+      return;
+    }
+    final current = isStart ? _startSeconds : _endSeconds;
+    double? target;
+    if (next) {
+      for (final kf in _keyframes) {
+        if (kf > current + 0.02) {
+          target = kf;
+          break;
+        }
+      }
+      target ??= _durationSeconds;
+    } else {
+      for (int i = _keyframes.length - 1; i >= 0; i--) {
+        if (_keyframes[i] < current - 0.02) {
+          target = _keyframes[i];
+          break;
+        }
+      }
+      target ??= 0.0;
+    }
+
+    if (isStart) {
+      _setStartSeconds(target);
+    } else {
+      _setEndSeconds(target);
+    }
   }
 
   int get _startFrame => (_startSeconds * _fps).round().clamp(0, _totalFrames);
@@ -250,7 +326,7 @@ class _TrimPageState extends State<TrimPage> {
         _customTargetFolder ?? getParentDirectoryPath(widget.videoItem.path);
     var fileName = _outputNameController.text.trim();
     if (fileName.isEmpty) {
-      fileName = "${_stripExtension(widget.videoItem.name)}_trim.mp4";
+      fileName = "${stripFileExtension(widget.videoItem.name)}_trim.mp4";
     }
     if (!fileName.contains('.')) {
       fileName = "$fileName.mp4";
@@ -355,11 +431,6 @@ class _TrimPageState extends State<TrimPage> {
     );
   }
 
-  static String _stripExtension(String fileName) {
-    final idx = fileName.lastIndexOf('.');
-    return idx > 0 ? fileName.substring(0, idx) : fileName;
-  }
-
   @override
   void dispose() {
     _startPreviewDebounce?.cancel();
@@ -413,9 +484,11 @@ class _TrimPageState extends State<TrimPage> {
                       final next = selection.first;
                       setState(() {
                         _mode = next;
-                        // Default to frame-accurate export in Fine mode, fast copy in Coarse mode.
+                        // Default to frame-accurate export in Fine mode, fast copy + keyframe snap in Coarse mode.
                         _frameAccurateExport =
                             next == TrimSelectionMode.fineFrame;
+                        _snapToKeyframe =
+                            next == TrimSelectionMode.coarseTime;
                       });
                     },
             ),
@@ -457,7 +530,18 @@ class _TrimPageState extends State<TrimPage> {
                 const SizedBox(height: 14),
 
                 // Console logs & progress bar
-                _buildConsolePanel(colorScheme, isDark, progress),
+                ConsoleLogPanel(
+                  title: "TRIM CONSOLE LOGS",
+                  commandPreview: _buildPreviewCommand(),
+                  idleMessage:
+                      "Ready to trim. Adjust time or frame boundaries above.",
+                  logs: _consoleLogs,
+                  scrollController: _consoleScrollController,
+                  progress: (_isTrimming || _hasTrimmed) ? progress : null,
+                  statusText: (_isTrimming || _hasTrimmed)
+                      ? "${(progress * 100).toStringAsFixed(0)}% (Frame $_currentTrimFrame / $_clipFrames)"
+                      : null,
+                ),
                 const SizedBox(height: 16),
 
                 // Bottom action buttons
@@ -659,7 +743,7 @@ class _TrimPageState extends State<TrimPage> {
     );
   }
 
-  /// Panel 1: Coarse Selection by Time (RangeSlider + Timecode inputs + second jumps).
+  /// Panel 1: Coarse Selection by Time (RangeSlider + Keyframe Snapping + Timecode inputs).
   Widget _buildCoarseTimePanel(ColorScheme colorScheme) {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
@@ -671,6 +755,38 @@ class _TrimPageState extends State<TrimPage> {
             const Text(
               "Coarse Selection (Time-Based)",
               style: TextStyle(fontSize: 14, fontWeight: FontWeight.bold),
+            ),
+            const SizedBox(width: 12),
+            FilterChip(
+              avatar: _isLoadingKeyframes
+                  ? const SizedBox(
+                      width: 14,
+                      height: 14,
+                      child: CircularProgressIndicator(strokeWidth: 1.5),
+                    )
+                  : const Icon(Icons.key, size: 15),
+              label: Text(
+                _isLoadingKeyframes
+                    ? "Scanning keyframes..."
+                    : "Snap to Keyframe (${_keyframes.length})",
+                style: const TextStyle(fontSize: 11.5),
+              ),
+              selected: _snapToKeyframe,
+              onSelected: _isTrimming
+                  ? null
+                  : (selected) {
+                      setState(() => _snapToKeyframe = selected);
+                      if (selected && _keyframes.isNotEmpty) {
+                        _setStartSeconds(
+                          _snapSecondsToNearestKeyframe(_startSeconds),
+                        );
+                        if (_endSeconds < _durationSeconds - 0.1) {
+                          _setEndSeconds(
+                            _snapSecondsToNearestKeyframe(_endSeconds),
+                          );
+                        }
+                      }
+                    },
             ),
             const Spacer(),
             Text(
@@ -699,12 +815,27 @@ class _TrimPageState extends State<TrimPage> {
                   final startChanged =
                       (values.start - _startSeconds).abs() > 0.001;
                   final endChanged = (values.end - _endSeconds).abs() > 0.001;
+
+                  double newStart = values.start;
+                  double newEnd = values.end;
+
+                  if (_snapToKeyframe && _keyframes.isNotEmpty) {
+                    if (startChanged) {
+                      newStart = _snapSecondsToNearestKeyframe(newStart);
+                    }
+                    if (endChanged && newEnd < _durationSeconds - 0.05) {
+                      newEnd = _snapSecondsToNearestKeyframe(newEnd);
+                    }
+                  }
+
+                  newEnd = math.max(
+                    newEnd,
+                    math.min(_durationSeconds, newStart + _minGapSeconds),
+                  );
+
                   setState(() {
-                    _startSeconds = values.start;
-                    _endSeconds = math.max(
-                      values.end,
-                      math.min(_durationSeconds, values.start + _minGapSeconds),
-                    );
+                    _startSeconds = newStart;
+                    _endSeconds = newEnd;
                     _hasTrimmed = false;
                     _syncControllers();
                   });
@@ -715,7 +846,7 @@ class _TrimPageState extends State<TrimPage> {
         const SizedBox(height: 8),
         Row(
           children: [
-            // Start time input + quick second jumps
+            // Start time input + quick second/keyframe jumps
             Expanded(
               child: _buildTimeControlGroup(
                 label: "Start Time (IN)",
@@ -723,16 +854,21 @@ class _TrimPageState extends State<TrimPage> {
                 onSubmit: (v) => _applyTimeInput(isStart: true, text: v),
                 onAdjustSeconds: (delta) =>
                     _setStartSeconds(_startSeconds + delta),
+                onPrevKeyframe: () => _stepKeyframe(isStart: true, next: false),
+                onNextKeyframe: () => _stepKeyframe(isStart: true, next: true),
               ),
             ),
             const SizedBox(width: 20),
-            // End time input + quick second jumps
+            // End time input + quick second/keyframe jumps
             Expanded(
               child: _buildTimeControlGroup(
                 label: "End Time (OUT)",
                 controller: _endTimeController,
                 onSubmit: (v) => _applyTimeInput(isStart: false, text: v),
                 onAdjustSeconds: (delta) => _setEndSeconds(_endSeconds + delta),
+                onPrevKeyframe: () =>
+                    _stepKeyframe(isStart: false, next: false),
+                onNextKeyframe: () => _stepKeyframe(isStart: false, next: true),
               ),
             ),
           ],
@@ -746,13 +882,22 @@ class _TrimPageState extends State<TrimPage> {
     required TextEditingController controller,
     required ValueChanged<String> onSubmit,
     required ValueChanged<double> onAdjustSeconds,
+    required VoidCallback onPrevKeyframe,
+    required VoidCallback onNextKeyframe,
   }) {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        Text(
-          label,
-          style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w600),
+        Row(
+          children: [
+            Text(
+              label,
+              style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w600),
+            ),
+            const Spacer(),
+            _buildMiniStepBtn("< KF", onPrevKeyframe),
+            _buildMiniStepBtn("KF >", onNextKeyframe),
+          ],
         ),
         const SizedBox(height: 6),
         Row(
@@ -1061,94 +1206,6 @@ class _TrimPageState extends State<TrimPage> {
             ),
           ],
         ),
-      ),
-    );
-  }
-
-  Widget _buildConsolePanel(
-    ColorScheme colorScheme,
-    bool isDark,
-    double progress,
-  ) {
-    return Container(
-      height: 125,
-      padding: const EdgeInsets.all(10),
-      decoration: BoxDecoration(
-        color: isDark ? Colors.black : Colors.grey[900],
-        borderRadius: BorderRadius.circular(8),
-        border: Border.all(
-          color: isDark ? Colors.grey[800]! : Colors.grey[400]!,
-        ),
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Row(
-            children: [
-              const Text(
-                "TRIM CONSOLE LOGS",
-                style: TextStyle(
-                  color: Colors.grey,
-                  fontSize: 10,
-                  fontWeight: FontWeight.bold,
-                  fontFamily: 'monospace',
-                ),
-              ),
-              const Spacer(),
-              if (_isTrimming || _hasTrimmed)
-                Text(
-                  "${(progress * 100).toStringAsFixed(0)}% (Frame $_currentTrimFrame / $_clipFrames)",
-                  style: TextStyle(
-                    color: colorScheme.primary,
-                    fontSize: 10,
-                    fontFamily: 'monospace',
-                    fontWeight: FontWeight.bold,
-                  ),
-                ),
-            ],
-          ),
-          if (_isTrimming || _hasTrimmed) ...[
-            const SizedBox(height: 4),
-            LinearProgressIndicator(value: progress, minHeight: 3),
-          ],
-          Divider(color: Colors.grey[800], height: 10),
-          Text(
-            "\$ ${_buildPreviewCommand()}",
-            maxLines: 1,
-            overflow: TextOverflow.ellipsis,
-            style: const TextStyle(
-              color: Colors.cyanAccent,
-              fontSize: 11,
-              fontFamily: 'monospace',
-            ),
-          ),
-          const SizedBox(height: 4),
-          Expanded(
-            child: _consoleLogs.isEmpty
-                ? Center(
-                    child: Text(
-                      "Ready to trim. Adjust time or frame boundaries above.",
-                      style: TextStyle(
-                        color: Colors.grey[600],
-                        fontSize: 11.5,
-                        fontFamily: 'monospace',
-                      ),
-                    ),
-                  )
-                : ListView.builder(
-                    controller: _consoleScrollController,
-                    itemCount: _consoleLogs.length,
-                    itemBuilder: (context, idx) => Text(
-                      _consoleLogs[idx],
-                      style: const TextStyle(
-                        color: Colors.white70,
-                        fontSize: 11,
-                        fontFamily: 'monospace',
-                      ),
-                    ),
-                  ),
-          ),
-        ],
       ),
     );
   }

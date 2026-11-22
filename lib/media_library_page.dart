@@ -316,7 +316,7 @@ class _MediaLibraryPageState extends State<MediaLibraryPage> {
             Icon(Icons.video_collection_outlined, color: colorScheme.primary),
             const SizedBox(width: 10),
             const Text(
-              "Video Media Library",
+              "VideoToolKit",
               style: TextStyle(fontWeight: FontWeight.w600, fontSize: 17),
             ),
             if (VideoService.isWebPreview) ...[
@@ -343,22 +343,24 @@ class _MediaLibraryPageState extends State<MediaLibraryPage> {
           ],
         ),
         actions: [
-          // Action button: Trim (enabled when exactly 1 video is selected)
-          Padding(
-            padding: const EdgeInsets.symmetric(vertical: 8, horizontal: 4),
-            child: OutlinedButton.icon(
-              onPressed: canTrim ? _openTrimPage : null,
-              icon: const Icon(Icons.content_cut, size: 18),
-              label: const Text("Trim"),
-            ),
-          ),
-          // Action button: Merge (enabled when 2 or more videos are selected)
+          // Single dynamic action button: Waiting (0), Trim (1), Merge (2+)
           Padding(
             padding: const EdgeInsets.symmetric(vertical: 8, horizontal: 4),
             child: FilledButton.icon(
-              onPressed: canMerge ? _openMergePage : null,
-              icon: const Icon(Icons.merge_type, size: 18),
-              label: Text(canMerge ? "Merge ($selectedCount)" : "Merge"),
+              onPressed: canTrim
+                  ? _openTrimPage
+                  : (canMerge ? _openMergePage : null),
+              icon: Icon(
+                canTrim
+                    ? Icons.content_cut
+                    : (canMerge ? Icons.merge_type : Icons.hourglass_empty),
+                size: 18,
+              ),
+              label: Text(
+                canTrim
+                    ? "Trim"
+                    : (canMerge ? "Merge ($selectedCount)" : "Waiting"),
+              ),
             ),
           ),
           const SizedBox(width: 4),

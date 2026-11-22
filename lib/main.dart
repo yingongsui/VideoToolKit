@@ -2,17 +2,17 @@ import 'package:flutter/material.dart';
 import 'app_settings.dart';
 import 'media_library_page.dart';
 
-void main() => runApp(const VideoMergerApp());
+void main() => runApp(const VideoToolKitApp());
 
 /// Root application widget managing system/light/dark appearance and color themes.
-class VideoMergerApp extends StatefulWidget {
-  const VideoMergerApp({super.key});
+class VideoToolKitApp extends StatefulWidget {
+  const VideoToolKitApp({super.key});
 
   @override
-  State<VideoMergerApp> createState() => _VideoMergerAppState();
+  State<VideoToolKitApp> createState() => _VideoToolKitAppState();
 }
 
-class _VideoMergerAppState extends State<VideoMergerApp> {
+class _VideoToolKitAppState extends State<VideoToolKitApp> {
   final AppSettings _settings = AppSettings();
 
   @override
@@ -35,7 +35,7 @@ class _VideoMergerAppState extends State<VideoMergerApp> {
         final seedColor = _settings.activeColorTheme.seedColor;
 
         return MaterialApp(
-          title: "Video Merger Desktop",
+          title: "VideoToolKit",
           debugShowCheckedModeBanner: false,
           theme: ThemeData(
             useMaterial3: true,

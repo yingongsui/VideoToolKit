@@ -1,6 +1,6 @@
 {
-    "name": "video_merger",
-    "short_name": "video_merger",
+    "name": "VideoToolKit",
+    "short_name": "VideoToolKit",
     "start_url": ".",
     "display": "standalone",
     "background_color": "#0175C2",
