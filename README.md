@@ -1,114 +1,116 @@
 # VideoToolKit
 
-一款基于 Flutter 开发的轻量级桌面端视频媒体库与处理工具，支持 **macOS** 与 **Ubuntu Linux**，提供本地文件夹管理、流参数诊断、无损拼接合并（`-c copy`）以及粗选/精选视频截取功能。
+[English](README.md) | [日本語](README.ja.md) | [简体中文](README.zh-CN.md)
+
+A lightweight desktop video media library and processing utility built with Flutter for **macOS** and **Ubuntu Linux**. Manage local video folders, inspect detailed stream diagnostics, perform lossless video concatenation (`-c copy`), and trim videos with both coarse keyframe snapping and fine frame-accurate controls.
 
 ---
 
-## 核心功能
+## Features
 
-### 1. 桌面端媒体库
-- **多文件夹持久化管理**：添加任意本地视频目录（自动保存至本地配置），支持按单目录或 `All Folders` 浏览、按文件名实时检索与刷新。
-- **自动抽帧缩略图**：按视频总帧数的 **10%** 自动采样生成并缓存缩略图，兼顾短视频与长视频。
-- **自定义视频扩展名**：除内置格式（`mp4 / mkv / mov / avi / webm / m4v / flv / ts`）外，可在设置中自由增删自定义扩展名（如 `rmvb / m2ts / vob`），立即生效。
-- **单按钮智能联动**：右上角操作按钮随选中数量自动切换：
-  - 未选择 → `Waiting`（禁用态）
-  - 选中 1 个 → `Trim`（进入视频截取）
-  - 选中 2 个及以上 → `Merge (N)`（按勾选顺序进入无损合并）
-- **个性化外观与提示**：
-  - 默认跟随系统深浅色（支持 `System / Light / Dark` 切换），内置 **6 套 Material 3 颜色主题**；
-  - 全局采用居中悬浮胶囊 Toast 通知（成功/警告/错误/提示区分色）。
+### 1. Desktop Media Library
+- **Persistent Folder Management**: Add multiple local video directories (persisted locally), browse by individual folder or `All Folders`, search by filename, and refresh anytime.
+- **Automatic Thumbnails**: Extracts and caches thumbnails sampled at **10%** of each video's total frames for both short and long clips.
+- **Custom Video Extensions**: Built-in support for `mp4 / mkv / mov / avi / webm / m4v / flv / ts`, plus customizable extra extensions (e.g. `rmvb / m2ts / vob`) in Settings.
+- **Dynamic Single Action Button**: Automatically adapts in the top-right corner based on selection:
+  - `0` selected → `Waiting` (disabled)
+  - `1` selected → `Trim`
+  - `2+` selected → `Merge (N)` (preserves selection order)
+- **Themes & Notifications**:
+  - Follows system appearance by default (`System / Light / Dark`) with **6 Material 3 color themes**.
+  - Centered floating capsule toast notifications styled by status (`success / warning / error / info`).
 
-### 2. 流参数诊断与无损合并（Merge）
-- **9 项核心流检测**：
-  - 视频流：编码（`Codec`）、分辨率（`Resolution`）、时间基（`Timebase`）、帧率（`FPS`）、像素格式/位深（`pix_fmt`）、编码 Profile（自动映射如 `High / Main / Baseline`）
-  - 音频流：音频编码（`Audio Codec`）、采样率（`Sample Rate`）、声道布局（`Channel Layout`）
-- **自动流一致性校验**：合并多段视频前自动以第 1 个视频为基准比对上述 9 项参数（**FPS 允许 ±0.5 容差**），存在差异时在顶部横幅与对应卡片高亮提示。
-- **无损直通拼接**：使用 FFmpeg `concat` demuxer（`-c copy`）极速合并，支持拖拽重排顺序、单视频实时进度渐变、自定义输出目录、终端日志实时滚动与随时强制终止。
+### 2. Stream Diagnostics & Lossless Merge
+- **9 Stream Parameters Probed**:
+  - **Video**: Codec, Resolution, Timebase, Frame Rate (`FPS`), Pixel Format / Bit Depth (`pix_fmt`), Codec Profile (normalized e.g. `High / Main / Baseline`)
+  - **Audio**: Audio Codec, Sample Rate, Channel Layout
+- **Stream Compatibility Check**: Automatically compares all queued clips against the first clip across all 9 fields (**±0.5 FPS tolerance**) and highlights mismatches before running `-c copy`.
+- **Fast Lossless Concatenation**: Uses the FFmpeg `concat` demuxer (`-c copy`) with drag-to-reorder, per-clip progress gradients, custom output directory, live console logs, and instant cancellation.
 
-### 3. 双模式视频截取（Trim）
-- **粗选（Coarse - Time）**：
-  - 全时长双滑块 + `HH:MM:SS.mmm` 时间码输入 + `±1s / ±10s` 快捷微调；
-  - 默认开启 **最近关键帧吸附（Snap to Nearest Keyframe）** 与 `< KF / KF >` 关键帧跳转，采用 FFprobe **`-read_intervals` 按需局部扫描**（仅扫描光标附近区间，长视频秒开不卡顿），解决 `-c copy` 切不到关键帧的问题。
-- **精选（Fine - Frame）**：
-  - 与粗选区间实时同步，提供 **±5 秒局部缩放逐帧滑块**、精确帧号输入与 `±1f / ±10f` 步进；
-  - 默认启用帧精准重编码（`libx264 CRF 18 + AAC`），也可自由切换回 `-c copy`。
-- **起止帧实时预览**：顶部并排实时展示当前选中的 **START (IN)** 与 **END (OUT)** 关键帧画面及时间码/帧号。
+### 3. Dual-Mode Video Trim
+- **Coarse Mode (Time-Based)**:
+  - Full-duration range slider, `HH:MM:SS.mmm` timecode inputs, and `±1s / ±10s` step controls.
+  - **Snap to Nearest Keyframe** enabled by default with `< KF / KF >` jumping, powered by on-demand FFprobe **`-read_intervals` local scanning** (scans only a local window around the cursor—instant startup even on multi-hour videos).
+- **Fine Mode (Frame-Accurate)**:
+  - Synchronized with the coarse range, offering a **±5s zoomed frame scrubber**, direct frame number entry, and `±1f / ±10f` stepping.
+  - Defaults to frame-accurate re-encoding (`libx264 CRF 18 + AAC`) with an option to toggle back to `-c copy`.
+- **Live Start / End Frame Previews**: Side-by-side **START (IN)** and **END (OUT)** frame previews with live timecode and frame number overlays.
 
 ---
 
-## 支持平台与架构
+## Supported Platforms
 
-| 平台 | FFmpeg 后端 | 发布格式 |
+| Platform | FFmpeg Backend | Release Format |
 | --- | --- | --- |
-| **macOS** (Apple Silicon) | 内置 `ffmpeg_kit_flutter_new`（免安装系统 FFmpeg） | `.dmg` |
-| **Ubuntu Linux** (amd64) | 系统 `ffmpeg` / `ffprobe`（`.deb` 安装时由 `apt` 自动拉取） | `.deb` |
-| **Web（仅本地 UI 调试）** | Mock 预览层（`video_service_web.dart`，`web/` 已忽略不入库） | 仅本地 `flutter run -d chrome` |
+| **macOS** (Apple Silicon) | Bundled `ffmpeg_kit_flutter_new` (no system FFmpeg required) | `.dmg` |
+| **Ubuntu Linux** (amd64) | System `ffmpeg` / `ffprobe` (installed automatically via `.deb` `Depends`) | `.deb` |
+| **Web (Local UI Preview)** | Mock preview layer (`video_service_web.dart`; `web/` is gitignored) | `flutter run -d chrome` |
 
 ---
 
-## 安装与使用
+## Installation
 
-从仓库右侧 **Releases** 页面直接下载对应平台的安装包（无需解压 `.zip`）：
+Download the direct installer for your platform from the repository's **Releases** page (no `.zip` extraction needed):
 
 ### macOS
-1. 下载 `VideoToolKit-<version>-macos.dmg`，将 `VideoToolKit.app` 拖入 `Applications`。
-2. 首次打开若触发系统未签名提示，在终端执行一次：
+1. Download `VideoToolKit-<version>-macos.dmg` and drag `VideoToolKit.app` into `Applications`.
+2. If macOS blocks the unsigned app on first launch, run:
    ```bash
    xattr -cr /Applications/VideoToolKit.app
    ```
 
 ### Ubuntu Linux (amd64)
-使用 `apt` 安装（自动补齐 `ffmpeg`、`libgtk-3`、`zenity` 等依赖并创建桌面菜单图标与命令行入口）：
+Install with `apt` to automatically resolve `ffmpeg`, `libgtk-3`, and `zenity` dependencies and register the launcher icon and CLI command:
 ```bash
 sudo apt install ./VideoToolKit-<version>-amd64.deb
 
-# 终端启动（或直接从应用菜单打开 VideoToolKit）
+# Launch from terminal (or via the Applications menu)
 videotoolkit
 
-# 卸载
+# Uninstall
 sudo apt remove videotoolkit
 ```
 
 ---
 
-## 开发与云端构建
+## Development & Cloud Builds
 
-### 本地开发与 UI 预览
-- 环境要求：Flutter `3.44.2`（Dart SDK `^3.11.5`）
-- 如需在未安装 Xcode 的 macOS 上仅预览调试 UI：
+### Local Development
+- Requirements: Flutter `3.44.2` (Dart SDK `^3.11.5`)
+- Preview UI locally in a browser without installing Xcode:
   ```bash
   flutter create . --platforms=web
   flutter run -d chrome
   ```
-- 静态检查：
+- Static analysis:
   ```bash
   flutter pub get
   flutter analyze
   ```
 
-### GitHub Actions 云端打包
-项目内置两条按需触发的云端构建流水线（支持在 **Actions** 页面点击 **Run workflow** 手动触发，或推送 `v*` 标签自动发布）：
-- [build_macos.yml](.github/workflows/build_macos.yml)：在 `macos-15` 上构建并发布 `VideoToolKit-<version>-macos.dmg` 至对应版本 Release（带 CocoaPods 缓存）。
-- [build_linux.yml](.github/workflows/build_linux.yml)：在 `ubuntu-24.04` 上构建并发布 `VideoToolKit-<version>-amd64.deb` 至对应版本 Release。
+### GitHub Actions Cloud Packaging
+Both workflows run on demand via **Actions → Run workflow** or automatically when pushing a `v*` tag:
+- [build_macos.yml](.github/workflows/build_macos.yml): Builds and publishes `VideoToolKit-<version>-macos.dmg` on `macos-15` (with CocoaPods caching).
+- [build_linux.yml](.github/workflows/build_linux.yml): Builds and publishes `VideoToolKit-<version>-amd64.deb` on `ubuntu-24.04`.
 
-> 版本号统一由 [pubspec.yaml](pubspec.yaml) 的 `version` 字段管理；同版本号重跑工作流会自动覆盖对应平台的安装包。
+> The app version is controlled by `version` in [pubspec.yaml](pubspec.yaml). Re-running a workflow on the same version overwrites that platform's asset in the matching GitHub Release.
 
 ---
 
-## 目录结构
+## Project Structure
 
 ```text
 lib/
-├── main.dart                  # 应用入口与全局 Material 3 主题管理
-├── app_settings.dart          # 主题模式、颜色主题、自定义扩展名持久化
-├── settings_dialog.dart       # 设置弹窗 UI
-├── media_library_page.dart    # 主界面：文件夹侧边栏与视频网格媒体库
-├── merge_page.dart            # 无损拼接与流一致性校验页面
-├── trim_page.dart             # 粗选（时间+关键帧吸附）/ 精选（逐帧）截取页面
-├── console_log_panel.dart     # 复用的 FFmpeg 控制台日志与进度面板
-├── floating_toast.dart        # 居中悬浮胶囊 Toast 提示组件
-├── video_models.dart          # VideoMetadata / VideoItem 与纯 Dart 格式化工具
-├── video_service.dart         # 平台条件导出入口
-├── video_service_native.dart  # macOS (FFmpegKit) 与 Linux (ffmpeg/ffprobe CLI) 实现
-└── video_service_web.dart     # 本地 Web UI 调试用 Mock 实现
+├── main.dart                  # Entry point & global Material 3 theme
+├── app_settings.dart          # Theme mode, color presets & custom extensions store
+├── settings_dialog.dart       # Settings modal UI
+├── media_library_page.dart    # Main screen: folder sidebar & video grid
+├── merge_page.dart            # Lossless concatenation & stream compatibility check
+├── trim_page.dart             # Coarse (time + keyframe snap) & Fine (frame) trimmer
+├── console_log_panel.dart     # Shared FFmpeg console log & progress panel
+├── floating_toast.dart        # Centered floating capsule toast overlay
+├── video_models.dart          # VideoMetadata / VideoItem & pure Dart formatters
+├── video_service.dart         # Platform-conditional export entry
+├── video_service_native.dart  # macOS (FFmpegKit) & Linux (ffmpeg/ffprobe CLI) backend
+└── video_service_web.dart     # Local Web UI preview mock backend
 ```
