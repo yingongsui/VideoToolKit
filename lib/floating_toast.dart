@@ -1,5 +1,5 @@
 import 'dart:async';
-import 'package:flutter/material.dart';
+import 'package:material_ui/material_ui.dart';
 
 // ============================================================================
 // Floating Capsule Toast Notification (Desktop Overlay Replacement for SnackBar)

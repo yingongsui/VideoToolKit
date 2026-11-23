@@ -1,6 +1,6 @@
 import 'dart:async';
 import 'dart:math' as math;
-import 'package:flutter/material.dart';
+import 'package:material_ui/material_ui.dart';
 import 'console_log_panel.dart';
 import 'floating_toast.dart';
 import 'video_service.dart';

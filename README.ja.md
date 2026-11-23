@@ -76,7 +76,7 @@ sudo apt remove videotoolkit
 ## 開発＆クラウドビルド
 
 ### ローカル開発
-- 必要環境：Flutter `3.44.2`（Dart SDK `^3.11.5`）
+- 必要環境：Flutter `3.50.1`（Dart SDK `^3.11.5`）
 - Xcode なしの macOS でローカル UI プレビューを行う場合：
   ```bash
   flutter create . --platforms=web

@@ -76,7 +76,7 @@ sudo apt remove videotoolkit
 ## Development & Cloud Builds
 
 ### Local Development
-- Requirements: Flutter `3.44.2` (Dart SDK `^3.11.5`)
+- Requirements: Flutter `3.50.1` (Dart SDK `^3.11.5`)
 - Preview UI locally in a browser without installing Xcode:
   ```bash
   flutter create . --platforms=web

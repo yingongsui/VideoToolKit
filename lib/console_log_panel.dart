@@ -1,4 +1,4 @@
-import 'package:flutter/material.dart';
+import 'package:material_ui/material_ui.dart';
 
 // ============================================================================
 // Reusable Terminal Console Log Panel (Shared by MergePage & TrimPage)
