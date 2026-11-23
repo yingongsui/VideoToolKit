@@ -70,9 +70,17 @@ jobs:
           mkdir -p "${PKG_DIR}/usr/share/applications"
           mkdir -p "${PKG_DIR}/usr/share/icons/hicolor/512x512/apps"
 
-          # Copy Flutter Linux release bundle
+          # Copy Flutter Linux x64 release bundle
           cp -R build/linux/x64/release/bundle/* "${PKG_DIR}/opt/videotoolkit/"
           chmod 0755 "${PKG_DIR}/opt/videotoolkit/VideoToolKit"
+
+          # Remove unused bundled ffmpeg-kit .so files (Linux uses system ffmpeg via apt Depends)
+          FFMPEGKIT_LIB_SRC="build/linux/x64/release/plugins/ffmpeg_kit_flutter_new/ffmpeg-kit/ffmpeg-kit/lib"
+          if [ -d "${FFMPEGKIT_LIB_SRC}" ]; then
+            for f in "${FFMPEGKIT_LIB_SRC}"/*.so*; do
+              [ -e "$f" ] && rm -f "${PKG_DIR}/opt/videotoolkit/lib/$(basename "$f")"
+            done
+          fi
 
           # Create CLI symlink
           ln -s /opt/videotoolkit/VideoToolKit "${PKG_DIR}/usr/bin/videotoolkit"
@@ -112,7 +120,8 @@ jobs:
           chmod 0755 "${PKG_DIR}/DEBIAN"
           chmod 0644 "${PKG_DIR}/DEBIAN/control"
 
-          dpkg-deb --build --root-owner-group "${PKG_DIR}" "dist/VideoToolKit-${APP_VERSION}-amd64.deb"
+          dpkg-deb -Zxz --build --root-owner-group "${PKG_DIR}" "dist/VideoToolKit-${APP_VERSION}-amd64.deb"
+          ls -lh "dist/VideoToolKit-${APP_VERSION}-amd64.deb"
 
       - name: Publish direct .deb download to GitHub Release
         uses: softprops/action-gh-release@v2

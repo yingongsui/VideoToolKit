@@ -1,4 +1,4 @@
-name: Build macOS Desktop App
+name: Build macOS Desktop App (Apple Silicon)
 
 on:
   # Trigger manually from GitHub Actions tab or when pushing a version tag (e.g. v1.2.0).
@@ -13,7 +13,7 @@ concurrency:
 
 jobs:
   build_macos:
-    name: Build macOS Release (.dmg)
+    name: Build macOS arm64 Release (.dmg)
     runs-on: macos-15
 
     permissions:
@@ -46,10 +46,10 @@ jobs:
       - name: Install Dart & Flutter dependencies
         run: flutter pub get
 
-      - name: Build macOS release app
+      - name: Build macOS arm64 release app
         run: flutter build macos --release
 
-      - name: Package .dmg
+      - name: Strip x86_64 slices (arm64-only) & package compressed .dmg
         run: |
           APP_VERSION=$(grep '^version:' pubspec.yaml | awk '{print $2}' | cut -d'+' -f1)
           if [[ "${GITHUB_REF}" == refs/tags/v* ]]; then
@@ -60,19 +60,37 @@ jobs:
           echo "APP_VERSION=${APP_VERSION}" >> "$GITHUB_ENV"
           echo "RELEASE_TAG=${RELEASE_TAG}" >> "$GITHUB_ENV"
 
+          APP_PATH="build/macos/Build/Products/Release/VideoToolKit.app"
+          echo "App size before thinning: $(du -sh "$APP_PATH" | cut -f1)"
+
+          # Strip Intel x86_64 slices from prebuilt universal frameworks (FlutterMacOS, ffmpeg_kit, etc.).
+          while IFS= read -r -d '' bin; do
+            if file "$bin" | grep -q "Mach-O universal binary"; then
+              if lipo -info "$bin" 2>/dev/null | grep -q "arm64"; then
+                lipo -thin arm64 "$bin" -output "${bin}.arm64" && mv "${bin}.arm64" "$bin"
+              fi
+            fi
+          done < <(find "$APP_PATH" -type f -print0)
+
+          # Re-apply ad-hoc code signature required for arm64 execution after thinning.
+          codesign --force --deep --sign - "$APP_PATH"
+          echo "App size after arm64 thinning: $(du -sh "$APP_PATH" | cut -f1)"
+
           mkdir -p dist/dmg_stage
-          cp -R "build/macos/Build/Products/Release/VideoToolKit.app" dist/dmg_stage/
+          cp -R "$APP_PATH" dist/dmg_stage/
           ln -s /Applications dist/dmg_stage/Applications
+          # Use ULFO (LZFSE compression, macOS 10.15+) for smaller DMG size.
           hdiutil create \
             -volname "VideoToolKit" \
             -srcfolder dist/dmg_stage \
             -ov \
-            -format UDZO \
-            "dist/VideoToolKit-${APP_VERSION}-macos.dmg"
+            -format ULFO \
+            "dist/VideoToolKit-${APP_VERSION}-macos-arm64.dmg"
+          ls -lh "dist/VideoToolKit-${APP_VERSION}-macos-arm64.dmg"
 
       - name: Publish direct .dmg download to GitHub Release
         uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ env.RELEASE_TAG }}
           name: VideoToolKit ${{ env.RELEASE_TAG }}
-          files: dist/VideoToolKit-${{ env.APP_VERSION }}-macos.dmg
+          files: dist/VideoToolKit-${{ env.APP_VERSION }}-macos-arm64.dmg

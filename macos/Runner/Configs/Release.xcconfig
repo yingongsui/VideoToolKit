@@ -1,2 +1,7 @@
 #include "../../Flutter/Flutter-Release.xcconfig"
 #include "Warnings.xcconfig"
+
+// Target Apple Silicon (arm64) 64-bit only to cut build time and bundle size.
+ARCHS = arm64
+ONLY_ACTIVE_ARCH = YES
+EXCLUDED_ARCHS = x86_64
